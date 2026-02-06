@@ -7,6 +7,8 @@ If streamlink has an issue, search on its github repository. yt-dlp can be used 
 
 - record_mergeall.py : merge all mp4 for each recorded live and do some files renaming<br />
 
+- chat_downloader module : I made some changes, see https://github.com/night-0909/youtubecomments
+
 **General principles :**
 - **record_channel.py** : setup a cron every minute.<br />
 This script check every 5 seconds (setting wait_before_retry) if there'a new live for a Youtube channel. If recording isn't done yet, it create 3 files :<br />
