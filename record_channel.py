@@ -606,7 +606,7 @@ if __name__ == "__main__":
         # Youtube
         'youtubeKey': '', # YouTube API Key from Google Cloud, see https://helano.github.io/help.html
         # Format
-        'tz': 'Europe/Paris',
+        'tz': 'Europe/Paris', # Set tz also in chat_downloader/formatting/custom_formats.json to apply tz to chat messages date
         'dateFormats': {'dateString': '%d/%m/%Y %H:%M:%S', 'dateDBString': '%Y-%m-%d %H:%M:%S', 'dateFileString': '%d%m%Y%H%M%S'},
         # Recording
         'wait_before_retry': 5,
