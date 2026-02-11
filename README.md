@@ -7,7 +7,23 @@ If streamlink has an issue, search on its github repository. yt-dlp can be used 
 
 - record_mergeall.py : merge all mp4 for each recorded live and do some files renaming<br />
 
-- chat_downloader module : I made some changes, see https://github.com/night-0909/youtubecomments
+- chat_downloader module : I made some changes, see https://github.com/night-0909/youtubecomments<br/>
+When live is finished (not the case here), chat_downloader prints timecode (eg. 03:00) of each chat message.<br/>
+But when live is ongoing (case here), chat_downloader prints datetime (2026-01-01 00:00:00) of each chat message.<br/>
+To set your own datetime format, you need to set it in chat_downloader/formatting/custom_formats.json
+using timestamp->format and timestamp->tz<br/>
+For instance :
+```{
+    "default": {
+        "template": "{time_text|timestamp}{author.badges}{money.text}{author.display_name|author.name} ({author.id}) {message}",
+        "keys": {
+            "time_text": "{} ",
+            "timestamp": {
+                "template": "{} : ",
+                "format": "%d/%m/%Y %H:%M:%S",
+                "tz": "Europe/Paris"
+            },
+```
 
 **General principles :**
 - **record_channel.py** : setup a cron every minute.<br />
