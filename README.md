@@ -4,6 +4,7 @@ Automatic recording of youtube lives with chat with Mysql database
 - recordytb.sql : creation of Mysql tables.<br />
 - record_channel.py : record stream and chat of lives of a Youtube channel.<br />
 For video, it uses yt-dlp (recommended) or streamlink to record stream. See https://github.com/yt-dlp/yt-dlp and  https://github.com/streamlink/streamlink<br />
+yt-dlp needs deno, install it and set its path in settings['record_video']['yt-dlp_options']
 For chat, it uses chat_downloader. See https://github.com/xenova/chat-downloader<br />
 
 Read documentation of these two softwares and if an issue occurs search in their Github repository.<br />
