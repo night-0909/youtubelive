@@ -818,6 +818,7 @@ class Program():
         self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Recording of chat ended", 'normal')
 
     def getVideoInfos(self, url):
+        infosVideo = {"ytInitialPlayerResponse": None, "videoDetails": None}
         try:
             if self.settings['cookies']:
                 cookie_jar = MozillaCookieJar(self.settings['cookies'])
@@ -835,27 +836,29 @@ class Program():
                 ytInitialPlayerResponse = re.findall('ytInitialPlayerResponse\\s*=\\s*({.+?})\\s*;', response.text)
                 if len(ytInitialPlayerResponse) == 1:
                     data = json.loads(ytInitialPlayerResponse[0])
+                    infosVideo["ytInitialPlayerResponse"] = data                    
+                    
                     videoDetails = data.get('videoDetails')
                     playabilityStatus = data.get('playabilityStatus')
                     if videoDetails is not None:
                         video = {"videoId": videoDetails.get('videoId'), "title": videoDetails.get('title'),
                         "is_live": videoDetails.get("isLive"), "playabilityStatus": playabilityStatus}
-                        return video                 
+                        infosVideo["videoDetails"] = video
                     else:
-                        print(f"ytInitialPlayerResponse : videoDetails not found, status={playabilityStatus.get('status')} reason={playabilityStatus.get('reason')}")
-                        self.writelog(f"ytInitialPlayerResponse : videoDetails not found, status={playabilityStatus.get('status')} reason={playabilityStatus.get('reason')}", 'debug')
+                        print(f"{url} ytInitialPlayerResponse : videoDetails not found, status={playabilityStatus.get('status')} reason={playabilityStatus.get('reason')}")
+                        self.writelog(f"{url} ytInitialPlayerResponse : videoDetails not found, status={playabilityStatus.get('status')} reason={playabilityStatus.get('reason')}", 'debug')
                 else:
-                    print(f"ytInitialPlayerResponse not found")
-                    self.writelog(f"ytInitialPlayerResponse not found", 'debug')
+                    print(f"{url} ytInitialPlayerResponse not found")
+                    self.writelog(f"{url} ytInitialPlayerResponse not found", 'debug')
             else:
                 print(f"[×] Response of url {url} isn't OK : {response.status_code} {response.text}")
-                self.writelog(f"[×] Response of url {url} isn't OK : {response.status_code} {response.text}")
-                return
+                self.writelog(f"[×] Response of url {url} isn't OK : {response.status_code} {response.text}", 'normal')
         except Exception as e:
             print(f"[×] Error url {url} : {e}")
-            self.writelog(f"[×] Error url {url} : {e}")
-            return
+            self.writelog(f"[×] Error url {url} : {e}", 'normal')
 
+        return infosVideo
+        
     def searchLives(self, discovery_method):
         # discovery_method can has value 'live_url' (hit /live page) or 'streams_url' (hit /streams page)
         # 'live_url' can only capture last ongoing live, 'streams_url' can capture all running lives
@@ -883,15 +886,16 @@ class Program():
             # Hit /live and get videoId.
             url_channel_live = f"https://www.youtube.com/channel/{self.idchannel}/live"
             stream = self.getVideoInfos(url_channel_live)
-            if stream is not None and stream['is_live'] is True:
-                url = "https://www.youtube.com/watch?v=" + str(stream['videoId'])
+            
+            if stream['videoDetails'] is not None and stream['videoDetails']['is_live'] is True:
+                url = "https://www.youtube.com/watch?v=" + str(stream['videoDetails']['videoId'])
                 print(f"{url} is live !")
                 self.writelog(f"{url} is live !", 'debug')
                 
                 #print(f"Streams info from webpage : {stream}")
                 #self.writelog(f"Streams info from webpage : {stream}", 'debug')
                 
-                streams.append(stream)            
+                streams.append(stream['videoDetails'])            
         elif discovery_method == 'streams_url':
             # Warning : browsing /streams can sometimes display ended streams as still running
             # scrapetube method can be replaced by :
@@ -915,7 +919,7 @@ class Program():
 
         print(f"With discovery_method = {discovery_method}, found {len(streams)} running streams right now for this channel")
         self.writelog(f"With discovery_method = {discovery_method}, found {len(streams)} running streams right now for this channel", 'debug')
-        
+               
         if len(streams) == 0:
             return
         
