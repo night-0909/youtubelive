@@ -32,7 +32,7 @@ If recording hasn't started yet, it creates :<br />
 - for chat recording : chat.idchannel.idvideo.XXX.txt (contains messages), chat_downloader.idchannel.idvideo.XXX.txt (contains exceptions and messages)<br />
 - for video recording :<br />
 streamlink : video.idchannel.idvideo.XXX.ts, streamlink.idchannel.idvideo.XXX.txt<br />
-yt-dlp : video.idchannel.idvideo.XXX.fYYY.mp4, yt-dlp.idchannel.idvideo.XXX.txt<br />
+yt-dlp : video.idchannel.idvideo.XXX.fYYY.mp4 or video.idchannel.idvideo.XXX.mp4, yt-dlp.idchannel.idvideo.XXX.txt<br />
 
 At the end of the recording, for streamlink I convert ts file to mp4.<br />
 If there're some lagging/network connection problems, streamlink will exit after 120s timeout and record_channel.py will try every 5 sec to record stream/chat.
