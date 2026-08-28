@@ -559,7 +559,7 @@ class Program():
         # UPDATE live in lives table with dateEnd_YTB and dateLastEndRecord
         # Get stream endTime from YTB API V3
         dateEnd_YTB = None
-        if not dateEnd_YTB in live or live['dateEnd_YTB'] is None:
+        if live['dateEnd_YTB'] is None:
             videosInfosURL = "https://www.googleapis.com/youtube/v3/videos?key=" + self.settings['YoutubeAPIV3']['youtubeKey'] + "&id=" + live['idVideo'] + \
             "&part=snippet,contentDetails,statistics,liveStreamingDetails"
             print(videosInfosURL)
@@ -772,7 +772,7 @@ class Program():
         # UPDATE live in lives table with dateEnd_YTB and dateLastEndChat
         # Get stream endTime from YTB API V3
         dateEnd_YTB = None
-        if not dateEnd_YTB in live or live['dateEnd_YTB'] is None:
+        if live['dateEnd_YTB'] is None:
             videosInfosURL = "https://www.googleapis.com/youtube/v3/videos?key=" + self.settings['YoutubeAPIV3']['youtubeKey'] + "&id=" + live['idVideo'] + \
             "&part=snippet,contentDetails,statistics,liveStreamingDetails"
             print(videosInfosURL)
