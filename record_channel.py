@@ -556,33 +556,9 @@ class Program():
             self.writelog(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error UPDATE record in records table with status_recording = 'recording' : {ex}", 'normal')
             self.exitProgram()
 
-        # UPDATE live in lives table with dateEnd_YTB and dateLastEndRecord
-        # Get stream endTime from YTB API V3
-        dateEnd_YTB = None
-        if live['dateEnd_YTB'] is None:
-            videosInfosURL = "https://www.googleapis.com/youtube/v3/videos?key=" + self.settings['YoutubeAPIV3']['youtubeKey'] + "&id=" + live['idVideo'] + \
-            "&part=snippet,contentDetails,statistics,liveStreamingDetails"
-            print(videosInfosURL)
-            try:
-                response = requests.get(videosInfosURL)
-                videosInfosResponse = response.text
-                if response.status_code == 200:
-                    video_json = json.loads(videosInfosResponse)       
-                    item = video_json.get('items')[0]
-                    actualEndTime = item.get('liveStreamingDetails').get('actualEndTime')
-                    # Convert datetime iso 2025-12-06T17:30:42Z to date with tz
-                    actualEndTime_object = dateutil.parser.isoparse(actualEndTime)
-                    dateEnd_YTB = actualEndTime_object.astimezone(self.tzinfo).strftime(self.settings['dateFormats']['dateDBString'])
-            except Exception as e:
-                # Not a problem if something's wrong in this request
-                print(f"id_live={live['id_live']} idVideo={live['idVideo']} Error getting actualEndTime from Youtube API V3 videosInfosURL {videosInfosURL} : {e}")
-                self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Error getting actualEndTime from Youtube API V3 videosInfosURL {videosInfosURL} : {e}", 'normal')
-            
+        # UPDATE live in lives table with dateLastEndRecord           
         # HOW TO : https://stackoverflow.com/questions/11517106/how-to-update-mysql-with-python-where-fields-and-entries-are-from-a-dictionary
         params = {'dateLastEndRecord': live["dateLastEndRecord"]}
-        if dateEnd_YTB is not None:
-            params['dateEnd_YTB'] = dateEnd_YTB        
-            
         try:
             connection = db.getConnection()
             cursor = connection.cursor(prepared=True, dictionary=True)
@@ -769,33 +745,9 @@ class Program():
             self.writelog(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error UPDATE chat in chats table with status_chat = 'finished' : {ex}", 'normal')
             self.exitProgram()
 
-        # UPDATE live in lives table with dateEnd_YTB and dateLastEndChat
-        # Get stream endTime from YTB API V3
-        dateEnd_YTB = None
-        if live['dateEnd_YTB'] is None:
-            videosInfosURL = "https://www.googleapis.com/youtube/v3/videos?key=" + self.settings['YoutubeAPIV3']['youtubeKey'] + "&id=" + live['idVideo'] + \
-            "&part=snippet,contentDetails,statistics,liveStreamingDetails"
-            print(videosInfosURL)
-            try:
-                response = requests.get(videosInfosURL)
-                videosInfosResponse = response.text
-                if response.status_code == 200:
-                    video_json = json.loads(videosInfosResponse)       
-                    item = video_json.get('items')[0]
-                    actualEndTime = item.get('liveStreamingDetails').get('actualEndTime')
-                    # Convert datetime iso 2025-12-06T17:30:42Z to date with tz
-                    actualEndTime_object = dateutil.parser.isoparse(actualEndTime)
-                    dateEnd_YTB = actualEndTime_object.astimezone(self.tzinfo).strftime(self.settings['dateFormats']['dateDBString'])
-            except Exception as e:
-                # Not a problem if something's wrong in this request
-                print(f"id_live={live['id_live']} idVideo={live['idVideo']} Error getting actualEndTime from Youtube API V3 videosInfosURL {videosInfosURL} : {e}")
-                self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Error getting actualEndTime from Youtube API V3 videosInfosURL {videosInfosURL} : {e}", 'normal')
-            
+        # UPDATE live in lives table with dateLastEndChat           
         # HOW TO : https://stackoverflow.com/questions/11517106/how-to-update-mysql-with-python-where-fields-and-entries-are-from-a-dictionary
-        params = {'dateLastEndChat': live["dateLastEndChat"]}
-        if dateEnd_YTB is not None:
-            params['dateEnd_YTB'] = dateEnd_YTB        
-            
+        params = {'dateLastEndChat': live["dateLastEndChat"]}           
         try:
             connection = db.getConnection()
             cursor = connection.cursor(prepared=True, dictionary=True)
@@ -901,7 +853,13 @@ class Program():
             # scrapetube method can be replaced by :
             # - call to Youtube API V3 /videos : too much consuming to have same detection delay as scrapetube
             # - use push notifications via PubSubHubbub. Then check every video and see if it concerns a running live. 
-            streams_scrapetube = scrapetube.get_channel(channel_id=self.idchannel, content_type="streams", limit=30, sort_by="newest")
+            try:
+                streams_scrapetube = scrapetube.get_channel(channel_id=self.idchannel, content_type="streams", limit=30, sort_by="newest")
+            except Exception as e:
+                print(f"[×] Error scrapetube /streams : {e}")
+                self.writelog(f"[×] Error scrapetube /streams : {e}", 'normal')
+                return
+            
             for stream in streams_scrapetube:
                 url = "https://www.youtube.com/watch?v=" + str(stream['videoId'])
                 print(url)
@@ -953,12 +911,6 @@ class Program():
                     live = result[0]
                     print(f"id_live={live['id_live']} idVideo={live['idVideo']} Ongoing live has already been recorded before")
                     self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Ongoing live has already been recorded before", 'debug')
-                    
-                    # Check if Youtube API V3 has given us actualEndTime
-                    if live['dateEnd_YTB'] is not None:
-                        print(f"id_live={live['id_live']} idVideo={live['idVideo']} live has ended actualEndTime={live['dateEnd_YTB']}")
-                        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} live has ended actualEndTime={live['dateEnd_YTB']}", 'debug')
-                        continue
                 else:
                     # Live has never been recorded before
                     print(f"idVideo={stream['videoId']} Ongoing live has never been recorded before")

@@ -1,7 +1,7 @@
 # -*- encoding: utf-8 -*-
 
 import scrapetube
-import requests, json, sys, os, psutil
+import requests, json, sys, os, psutil, io
 from datetime import datetime
 import dateutil.parser
 import threading
@@ -46,7 +46,7 @@ class Program():
         self.tzinfo = ZoneInfo(self.settings['tz'])
         self.initLoggingFile()
         self.initDebug()
-            
+                    
     def initLoggingFile(self):
         loggingfilename = os.path.dirname(os.path.realpath(__file__)) + "/record_process"
         self.loggingfile = open(loggingfilename + ".log", "a", encoding="utf-8")
@@ -194,7 +194,7 @@ class Program():
         print(f"id_live={live['id_live']} idVideo={idVideo} Starting merge of mp4 files...")
         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Starting merge of mp4 files...", 'normal')
         
-        merge = subprocess.Popen([self.settings['process_video']['path_ffmpeg'] + 'ffmpeg', "-f", "concat", "-safe", "0", "-i", file_list, "-c" , "copy", finalmp4file],
+        merge = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-f", "concat", "-safe", "0", "-i", file_list, "-c" , "copy", finalmp4file],
         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         merge.wait()
             
@@ -202,7 +202,7 @@ class Program():
         # To get only duration with no other info : ffprobe -v error -show_entries format=duration -sexagesimal -of default=noprint_wrappers=1:nokey=1 <file>
         # cf https://trac.ffmpeg.org/wiki/FFprobeTips#Formatcontainerduration
         durationMP4 = None
-        processGetInfoMP4 = subprocess.Popen([self.settings['process_video']['path_ffmpeg'] + 'ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-sexagesimal', '-of',
+        processGetInfoMP4 = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-sexagesimal', '-of',
         'default=noprint_wrappers=1:nokey=1', finalmp4file],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         stdout, stderr = processGetInfoMP4.communicate()
@@ -281,10 +281,134 @@ class Program():
             print(f"id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new values {params} : {ex}")
             self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new values {params} : {ex}", 'normal')
             self.exitProgram()                      
-      
+
+    def process_logfile(self, process, filename):
+        # Save stdout/stderr of process
+        # See solutions here : https://stackoverflow.com/questions/2804543/read-subprocess-stdout-line-by-line
+        logfile = open(filename, 'w', encoding="utf-8")
+        for line in io.TextIOWrapper(process.stdout, encoding="utf-8"):
+            dateNow = self.getDateNow()
+            message = dateNow["dateString"] + " : " + line.rstrip() + "\n"
+            logfile.write(message)
+            # Write in real time
+            logfile.flush()
+        
+        logfile.close()
+
+    def recordVideosFiles(self, live):
+        url = "https://www.youtube.com/watch?v=" + live['idVideo']
+        cmd_record = [self.settings['video_tools']['path_yt-dlp'] + 'yt-dlp',
+        '--ffmpeg-location', self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', *self.settings['download_files']['yt-dlp_options']]
+        
+        if self.settings['cookies']:
+            cmd_record.extend(['--cookies', self.settings['cookies']])
+                                    
+        cmd_record.append(url)
+        
+        print(f"id_live={live['id_live']} idVideo={live['idVideo']} yt-dlp commandline : {cmd_record}")
+        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} yt-dlp commandline : {cmd_record}", 'normal')
+        try:
+            # Ajouter un thread ici : faire une fonction plutôt et ensuite threads.join() à la fin du programme
+            recordProcess = subprocess.Popen(cmd_record, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+            # Record yt-dlp stderr and stdout to file
+            logfile = self.settings['folder_recording'] + 'downloading_files_' + live['idVideo'] + '.log'
+            record_yt_dlp_logfile_thread = threading.Thread(target=self.process_logfile, args=(recordProcess, logfile))
+            record_yt_dlp_logfile_thread.start()
+            
+            try:
+                db = Database(self.settings['params_database'])
+                connection = db.getConnection()
+            except Exception as e:
+                print(f"[×] Error connecting to database : {e}")
+                self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+                self.exitProgram()        
+            
+            params = {'status_downloading_all': 'ongoing'}
+            self.update_live(db, live, params)
+            
+            recordProcess.wait()
+            
+            print(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={recordProcess.returncode} : {logfile}")
+            self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={recordProcess.returncode} : {logfile}", 'normal')
+            
+            try:
+                db = Database(self.settings['params_database'])
+                connection = db.getConnection()
+            except Exception as e:
+                print(f"[×] Error connecting to database : {e}")
+                self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+                self.exitProgram()
+                
+            status_downloading_all = 'finished' if recordProcess.returncode == 0 else 'error'
+            params = {'status_downloading_all': status_downloading_all}
+            self.update_live(db, live, params)
+        except Exception as e:
+            print(f"id_live={live['id_live']} idVideo={live['idVideo']} Error launching yt-dlp to download files : exception={e}")
+            self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Error launching yt-dlp to download files : exception={e}", 'normal')
+     
+    def process_download_videos(self):
+        # ************** Download live files from Youtube (video, audio, subs or infos that yt-dlp can save in a file (description, title, etc...)) *********
+        # Downloading after end of live can be useful if : you use record_channel only to record chat, if live recording failed or missed some segments,
+        # you prefer higher quality, you want to save title and description and other metadata accessible by yt-dlp, etc...)
+        
+        print("Downloading files after live has ended")
+        
+        if self.settings['download_files']['enabled'] is False:
+            print(f"Downloading videos files is disabled")
+            self.writelog(f"Downloading videos files is disabled", 'normal')
+            return
+        
+        try:
+            db = Database(self.settings['params_database'])
+            connection = db.getConnection()
+        except Exception as e:
+            print(f"[×] Error connecting to database : {e}")
+            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            self.exitProgram()        
+        
+        if self.settings['download_files']['enabled'] is True:
+            downloadThreadList = []            
+            try:
+                select_livesR_query = """SELECT * FROM lives, records WHERE lives.id_live = records.id_live
+                AND lives.status_downloading_all IS NULL
+                ORDER BY lives.id_live, records.id_record ASC"""
+                connection = db.getConnection()
+                cursor = connection.cursor(prepared=True, dictionary=True)
+                params = {}
+                cursor.execute(select_livesR_query, params)
+                lives_downloading_files_todo = cursor.fetchall()
+                if len(lives_downloading_files_todo) == 0:
+                    print("No live needs downloading video files")
+                    self.writelog("No live needs downloading video files", 'normal')
+                else:
+                    # Assemble an array with lives as parents and records as children
+                    lives_downloading_files_todo = self.arrangeListRecords(lives_downloading_files_todo)
+                cursor.close()
+            except Error as ex:
+                print(f"Mysql Error SELECT lives with records where video files has to be checked : {ex}")
+                self.writelog(f"Mysql Error SELECT lives with records where video files has to be checked : {ex}", 'normal')
+                self.exitProgram()
+
+            if len(lives_downloading_files_todo) > 0:
+                for live in lives_downloading_files_todo:
+                    # Start a video recording in a thread 
+                    downloadThread = threading.Thread(target=self.recordVideosFiles, args=[live])
+                    downloadThreadList.append(downloadThread)
+                    downloadThread.start()
+                    
+                # Wait for all thread to finish
+                for t in downloadThreadList:
+                    t.join()
+            
+
     def process_videos(self):
         print("Process videos files")
-        mergeThreadList = []
+        
+        if self.settings['process_video']['enabled'] is False:
+            print(f"Processing of videos files is disabled")
+            self.writelog(f"Processing if videos files is disabled", 'normal')
+            return
         
         try:
             db = Database(self.settings['params_database'])
@@ -304,8 +428,8 @@ class Program():
             cursor.execute(select_livesR_query, params)
             lives_records_todo = cursor.fetchall()
             if len(lives_records_todo) == 0:
-                print("No live should receive processing on video files")
-                self.writelog("No live should receive processing on video files", 'normal')
+                print("No live needs processing on video files")
+                self.writelog("No live needs processing on video files", 'normal')
             else:
                 # Assemble an array with lives as parents and records as children
                 lives_records_todo = self.arrangeListRecords(lives_records_todo)
@@ -316,6 +440,7 @@ class Program():
             self.exitProgram()
 
         if len(lives_records_todo) > 0:
+            mergeThreadList = []
             print("Browse lives with operations to do on video files")
             self.writelog("Browse lives with operations to do on video files", 'normal')
 
@@ -349,7 +474,13 @@ class Program():
                     # It can be replaced by a call to Youtube API V3 /videos or a call to YTB video url and get videoDetails->isLive
                     # 2 streams can be running at the same time on same channel
                     # Get last streams of channel
-                    streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, sort_by="newest")
+                    try:
+                        streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, sort_by="newest")
+                    except Exception as e:
+                        print(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
+                        self.writelog(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
+                        continue
+                    
                     for stream in streams:
                         if idVideo == stream['videoId'] and stream['is_live'] is True:
                             isRunning = True
@@ -402,7 +533,7 @@ class Program():
                             print(f"[×] idVideo={stream['videoId']} Impossible to get {lastRecord['recording_live_tool']} process informations for video recording : {e}")
                             self.writelog(f"[×] idVideo={stream['videoId']} Impossible to get {lastRecord['recording_live_tool']} process informations for video recording : {e}", 'normal')
                             # We continue normally
-                    
+                                            
                     # Before trying to merge mp4 files together, we make sure for streamlink records that all .ts are converted to .mp4 (case of crash of record_channel.py or error in conversion process in record_channel.py)
                     # and for yt-dlp that we have mp4 file
                     # We assure that live is not running + wait seconds_before_merge seconds before doing that, because otherwise a stream can be running at the time of the cron
@@ -429,7 +560,7 @@ class Program():
                                         print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_merge']} seconds but still present : {tsfile}, we convert it to mp4")
                                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_merge']} seconds but still present : {tsfile}, we convert it to mp4", 'normal')
                                         new_mp4file = tsfile.replace('.ts', '.mp4')
-                                        merge = subprocess.Popen([self.settings['process_video']['path_ffmpeg'] + 'ffmpeg', "-i", tsfile, "-c", "copy", new_mp4file],
+                                        merge = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-i", tsfile, "-c", "copy", new_mp4file],
                                         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
                                         merge.wait()
                                         
@@ -564,7 +695,7 @@ class Program():
 
                         mergeThread = threading.Thread(target=self.merge_mp4files, args=(live, mp4files))
                         mergeThreadList.append(mergeThread)
-                        mergeThread.start()
+                        mergeThread.start()                       
                     else:
                         print(f"id_live={live['id_live']} idVideo={idVideo} {lastRecord['recording_live_tool']} is still running, we skip video processing")
                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {lastRecord['recording_live_tool']} is still running, we skip video processing", 'normal')
@@ -585,6 +716,11 @@ class Program():
     def process_chats(self):
         print("Process chat files")
         
+        if self.settings['process_chat']['enabled'] is False:
+            print(f"Processing of chat files is disabled")
+            self.writelog(f"Processing of chat files is disabled", 'normal')
+            return
+        
         try:
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
@@ -603,8 +739,8 @@ class Program():
             cursor.execute(select_livesC_query, params)
             lives_chats_todo = cursor.fetchall()
             if len(lives_chats_todo) == 0:
-                print("No live should receive processing on chat files")
-                self.writelog("No live should receive processing on chat files", 'normal')
+                print("No live needs processing on chat files")
+                self.writelog("No live needs processing on chat files", 'normal')
             else:
                 # Assemble an array with lives as parents and chats as children
                 lives_chats_todo = self.arrangeListChats(lives_chats_todo)
@@ -792,15 +928,19 @@ class Program():
         process_videos_Thread.start()
         process_chats_Thread = threading.Thread(target=self.process_chats)
         process_chats_Thread.start()
+        process_download_videos_Thread = threading.Thread(target=self.process_download_videos)
+        process_download_videos_Thread.start()               
+        
         process_videos_Thread.join()
         process_chats_Thread.join()
-        
+        process_download_videos_Thread.join()
+                
         print("Execution was OK")
         self.writelog("Execution was OK")
         print("Ending program")
         self.writelog("Ending program")
         self.clean()
-          
+      
 if __name__ == "__main__":
     settings = {
         # Youtube
@@ -808,20 +948,32 @@ if __name__ == "__main__":
             'enabled': True, # attribute not used, Youtube Data API V3 is always used right now
             'youtubeKey': '' # YouTube API Key from Google Cloud, see https://helano.github.io/help.html
         },
+        'cookies' : '', # path of cookie file, or '' or None to disable
         # Format
         'tz': 'Europe/Paris',
         'dateFormats': {'dateString': '%d/%m/%Y %H:%M:%S', 'dateDBString': '%Y-%m-%d %H:%M:%S', 'dateFileString': '%d%m%Y%H%M%S'},
         # Converting and renaming
         'folder_recording': os.path.dirname(os.path.realpath(__file__)) + '/files/', # Add / at the end
-        'record_video' : {
-            'path_streamlink': '', # Add / at the end
+        'video_tools':
+            {'path_streamlink': '', # Add / at the end
             'path_yt-dlp' : '', # Add / at the end
+            'path_ffmpeg': os.path.dirname(os.path.realpath(__file__)) + '/' # Add / at the end, same directory for ffmpeg and ffprobe
+        },
+        'download_files' : {
+            'enabled' : True,
+            'yt-dlp_options': ['-S', 'res:480', '--remote-components', 'ejs:github', '--js-runtimes', 'deno:',  # Put path of deno folder
+            '--retries', '40', '--fragment-retries', '40', '--socket-timeout', '300',
+            '-v', '-k', '-o', os.path.dirname(os.path.realpath(__file__)) + '/files/' + '%(id)s %(title)s.%(ext)s',
+            '--no-part', '--merge-output-format', 'mp4',
+            '--extractor-args', 'youtube:player-client=default,web_embedded,mweb' #See https://github.com/yt-dlp/yt-dlp/issues/16862#issuecomment-4642619967
+            ]
         },
         'process_video': {
-            'path_ffmpeg': os.path.dirname(os.path.realpath(__file__)) + '/', # Add / at the end, same directory for ffmpeg and ffprobe
+            'enabled' : True,
             'seconds_before_merge': 60*5 # 5 minutes // Must be > "stream-timeout" from record_channel.py, plus let record_channel.py the time to to convert .ts in mp4
         },
         'process_chat': {
+            'enabled' : True,
             'seconds_before_rename_chat': 60*10, # 10 minutes
             "path_chat_downloader": '' # Add / at the end
         },        
