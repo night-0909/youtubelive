@@ -308,7 +308,6 @@ class Program():
         print(f"id_live={live['id_live']} idVideo={live['idVideo']} yt-dlp commandline : {cmd_record}")
         self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} yt-dlp commandline : {cmd_record}", 'normal')
         try:
-            # Ajouter un thread ici : faire une fonction plutôt et ensuite threads.join() à la fin du programme
             recordProcess = subprocess.Popen(cmd_record, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
             # Record yt-dlp stderr and stdout to file
@@ -370,20 +369,18 @@ class Program():
         if self.settings['download_files']['enabled'] is True:
             downloadThreadList = []            
             try:
-                select_livesR_query = """SELECT * FROM lives, records WHERE lives.id_live = records.id_live
-                AND lives.status_downloading_all IS NULL
-                ORDER BY lives.id_live, records.id_record ASC"""
+                select_livesD_query = """SELECT * FROM lives
+                WHERE lives.status_downloading_all IS NULL
+                ORDER BY lives.id_live ASC"""
                 connection = db.getConnection()
                 cursor = connection.cursor(prepared=True, dictionary=True)
                 params = {}
-                cursor.execute(select_livesR_query, params)
+                cursor.execute(select_livesD_query, params)
                 lives_downloading_files_todo = cursor.fetchall()
                 if len(lives_downloading_files_todo) == 0:
                     print("No live needs downloading video files")
                     self.writelog("No live needs downloading video files", 'normal')
-                else:
-                    # Assemble an array with lives as parents and records as children
-                    lives_downloading_files_todo = self.arrangeListRecords(lives_downloading_files_todo)
+                
                 cursor.close()
             except Error as ex:
                 print(f"Mysql Error SELECT lives with records where video files has to be checked : {ex}")
@@ -391,17 +388,35 @@ class Program():
                 self.exitProgram()
 
             if len(lives_downloading_files_todo) > 0:
+                print("Browse lives with downloading to do")
+                self.writelog("Browse lives with downloading to do", 'normal')
                 for live in lives_downloading_files_todo:
-                    # Start a video recording in a thread 
-                    downloadThread = threading.Thread(target=self.recordVideosFiles, args=[live])
-                    downloadThreadList.append(downloadThread)
-                    downloadThread.start()
+                    isRunning = False
+                    try:
+                        streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, sort_by="newest")
+                    except Exception as e:
+                        print(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
+                        self.writelog(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
+                        continue
+                    
+                    for stream in streams:
+                        if live['idVideo'] == stream['videoId'] and stream['is_live'] is True:
+                            isRunning = True
+                            break
+                
+                    if isRunning is False:
+                        # Start a video recording in a thread 
+                        downloadThread = threading.Thread(target=self.recordVideosFiles, args=[live])
+                        downloadThreadList.append(downloadThread)
+                        downloadThread.start()
+                    else:
+                        print(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downlading files")
+                        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downloading files", 'normal')
                     
                 # Wait for all thread to finish
                 for t in downloadThreadList:
                     t.join()
             
-
     def process_videos(self):
         print("Process videos files")
         
@@ -940,7 +955,7 @@ class Program():
         print("Ending program")
         self.writelog("Ending program")
         self.clean()
-      
+
 if __name__ == "__main__":
     settings = {
         # Youtube
