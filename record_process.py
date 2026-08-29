@@ -959,15 +959,6 @@ if __name__ == "__main__":
             'path_yt-dlp' : '', # Add / at the end
             'path_ffmpeg': os.path.dirname(os.path.realpath(__file__)) + '/' # Add / at the end, same directory for ffmpeg and ffprobe
         },
-        'download_files' : {
-            'enabled' : True,
-            'yt-dlp_options': ['-S', 'res:480', '--remote-components', 'ejs:github', '--js-runtimes', 'deno:',  # Put path of deno folder
-            '--retries', '40', '--fragment-retries', '40', '--socket-timeout', '300',
-            '-v', '-k', '-o', os.path.dirname(os.path.realpath(__file__)) + '/files/' + '%(id)s %(title)s.%(ext)s',
-            '--no-part', '--merge-output-format', 'mp4',
-            '--extractor-args', 'youtube:player-client=default,web_embedded,mweb' #See https://github.com/yt-dlp/yt-dlp/issues/16862#issuecomment-4642619967
-            ]
-        },
         'process_video': {
             'enabled' : True,
             'seconds_before_merge': 60*5 # 5 minutes // Must be > "stream-timeout" from record_channel.py, plus let record_channel.py the time to to convert .ts in mp4
@@ -976,6 +967,15 @@ if __name__ == "__main__":
             'enabled' : True,
             'seconds_before_rename_chat': 60*10, # 10 minutes
             "path_chat_downloader": '' # Add / at the end
+        },
+        'download_files' : {
+            'enabled' : True,
+            'yt-dlp_options': ['-S', 'res:480', '--remote-components', 'ejs:github', '--js-runtimes', 'deno:',  # Put path of deno folder
+            '--retries', '40', '--fragment-retries', '40', '--socket-timeout', '300',
+            '-v', '-k', '-o', os.path.dirname(os.path.realpath(__file__)) + '/files/' + '%(id)s %(title)s.%(ext)s',
+            '--no-part', '--merge-output-format', 'mp4',
+            '--extractor-args', 'youtube:player-client=default,web_embedded,mweb' #See https://github.com/yt-dlp/yt-dlp/issues/16862#issuecomment-4642619967
+            ]
         },        
         # MySQL connection
         'params_database': {'mysql_host': '', 'mysql_database': '',
