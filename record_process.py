@@ -329,10 +329,10 @@ class Program():
         params = {'status_downloading_all': 'ongoing'}
         self.update_live(db, live, params)
         
-        recordProcess.wait()
+        downloadProcess.wait()
         
-        print(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={recordProcess.returncode} : {logfile}")
-        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={recordProcess.returncode} : {logfile}", 'normal')
+        print(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={downloadProcess.returncode} : {logfile}")
+        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={downloadProcess.returncode} : {logfile}", 'normal')
         
         try:
             db = Database(self.settings['params_database'])
@@ -342,7 +342,7 @@ class Program():
             self.writelog(f"[×] Error connecting to database : {e}", 'normal')
             self.exitProgram()
             
-        status_downloading_all = 'finished' if recordProcess.returncode == 0 else 'error'
+        status_downloading_all = 'finished' if downloadProcess.returncode == 0 else 'error'
         params = {'status_downloading_all': status_downloading_all}
         self.update_live(db, live, params)
         
@@ -575,17 +575,17 @@ class Program():
                                         print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_merge']} seconds but still present : {tsfile}, we convert it to mp4")
                                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_merge']} seconds but still present : {tsfile}, we convert it to mp4", 'normal')
                                         new_mp4file = tsfile.replace('.ts', '.mp4')
-                                        merge = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-i", tsfile, "-c", "copy", new_mp4file],
+                                        convert = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-i", tsfile, "-c", "copy", new_mp4file],
                                         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-                                        merge.wait()
+                                        convert.wait()
                                         
-                                        if merge.returncode == 0 and os.path.isfile(new_mp4file) is True:
+                                        if convert.returncode == 0 and os.path.isfile(new_mp4file) is True:
                                             print(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 succeeded : {new_mp4file}")
                                             self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 succeeded : {new_mp4file}", 'normal')
                                             os.remove(tsfile)
                                         else:
-                                            print(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 encountered a problem. merge.returncode={merge.returncode}, isfile={os.path.isfile(new_mp4file)} : {new_mp4file}")
-                                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 encountered a problem. merge.returncode={merge.returncode}, isfile={os.path.isfile(new_mp4file)} : {new_mp4file}", 'normal')
+                                            print(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 encountered a problem. convert.returncode={convert.returncode}, isfile={os.path.isfile(new_mp4file)} : {new_mp4file}")
+                                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 encountered a problem. convert.returncode={convert.returncode}, isfile={os.path.isfile(new_mp4file)} : {new_mp4file}", 'normal')
                                             tsfiles.append(tsfile)
                                     else:
                                         print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is younger than {self.settings['process_video']['seconds_before_merge']} seconds so we don't do anything : {tsfile}")
