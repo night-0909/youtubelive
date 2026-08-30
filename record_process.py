@@ -295,57 +295,57 @@ class Program():
         
         logfile.close()
 
-    def recordVideosFiles(self, live):
+    def downloadVideosFiles(self, live):
         url = "https://www.youtube.com/watch?v=" + live['idVideo']
-        cmd_record = [self.settings['video_tools']['path_yt-dlp'] + 'yt-dlp',
+        cmd_download = [self.settings['video_tools']['path_yt-dlp'] + 'yt-dlp',
         '--ffmpeg-location', self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', *self.settings['download_files']['yt-dlp_options']]
         
         if self.settings['cookies']:
-            cmd_record.extend(['--cookies', self.settings['cookies']])
+            cmd_download.extend(['--cookies', self.settings['cookies']])
                                     
-        cmd_record.append(url)
+        cmd_download.append(url)
         
-        print(f"id_live={live['id_live']} idVideo={live['idVideo']} yt-dlp commandline : {cmd_record}")
-        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} yt-dlp commandline : {cmd_record}", 'normal')
+        print(f"id_live={live['id_live']} idVideo={live['idVideo']} yt-dlp commandline : {cmd_download}")
+        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} yt-dlp commandline : {cmd_download}", 'normal')
         try:
-            recordProcess = subprocess.Popen(cmd_record, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            downloadProcess = subprocess.Popen(cmd_download, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
             # Record yt-dlp stderr and stdout to file
             logfile = self.settings['folder_recording'] + 'downloading_files_' + live['idVideo'] + '.log'
-            record_yt_dlp_logfile_thread = threading.Thread(target=self.process_logfile, args=(recordProcess, logfile))
-            record_yt_dlp_logfile_thread.start()
-            
-            try:
-                db = Database(self.settings['params_database'])
-                connection = db.getConnection()
-            except Exception as e:
-                print(f"[×] Error connecting to database : {e}")
-                self.writelog(f"[×] Error connecting to database : {e}", 'normal')
-                self.exitProgram()        
-            
-            params = {'status_downloading_all': 'ongoing'}
-            self.update_live(db, live, params)
-            
-            recordProcess.wait()
-            
-            print(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={recordProcess.returncode} : {logfile}")
-            self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={recordProcess.returncode} : {logfile}", 'normal')
-            
-            try:
-                db = Database(self.settings['params_database'])
-                connection = db.getConnection()
-            except Exception as e:
-                print(f"[×] Error connecting to database : {e}")
-                self.writelog(f"[×] Error connecting to database : {e}", 'normal')
-                self.exitProgram()
-                
-            status_downloading_all = 'finished' if recordProcess.returncode == 0 else 'error'
-            params = {'status_downloading_all': status_downloading_all}
-            self.update_live(db, live, params)
+            dl_yt_dlp_logfile_thread = threading.Thread(target=self.process_logfile, args=(downloadProcess, logfile))
+            dl_yt_dlp_logfile_thread.start()
         except Exception as e:
             print(f"id_live={live['id_live']} idVideo={live['idVideo']} Error launching yt-dlp to download files : exception={e}")
             self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Error launching yt-dlp to download files : exception={e}", 'normal')
-     
+            
+        try:
+            db = Database(self.settings['params_database'])
+            connection = db.getConnection()
+        except Exception as e:
+            print(f"[×] Error connecting to database : {e}")
+            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            self.exitProgram()        
+        
+        params = {'status_downloading_all': 'ongoing'}
+        self.update_live(db, live, params)
+        
+        recordProcess.wait()
+        
+        print(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={recordProcess.returncode} : {logfile}")
+        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={recordProcess.returncode} : {logfile}", 'normal')
+        
+        try:
+            db = Database(self.settings['params_database'])
+            connection = db.getConnection()
+        except Exception as e:
+            print(f"[×] Error connecting to database : {e}")
+            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            self.exitProgram()
+            
+        status_downloading_all = 'finished' if recordProcess.returncode == 0 else 'error'
+        params = {'status_downloading_all': status_downloading_all}
+        self.update_live(db, live, params)
+        
     def process_download_videos(self):
         # ************** Download live files from Youtube (video, audio, subs or infos that yt-dlp can save in a file (description, title, etc...)) *********
         # Downloading after end of live can be useful if : you use record_channel only to record chat, if live recording failed or missed some segments,
@@ -405,15 +405,15 @@ class Program():
                             break
                 
                     if isRunning is False:
-                        # Start a video recording in a thread 
-                        downloadThread = threading.Thread(target=self.recordVideosFiles, args=[live])
+                        # Start downloading files in a thread 
+                        downloadThread = threading.Thread(target=self.downloadVideosFiles, args=[live])
                         downloadThreadList.append(downloadThread)
                         downloadThread.start()
                     else:
                         print(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downlading files")
                         self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downloading files", 'normal')
                     
-                # Wait for all thread to finish
+                # Wait for all threads to finish
                 for t in downloadThreadList:
                     t.join()
             
@@ -931,13 +931,16 @@ class Program():
         # Possible cases :
         #   1- if "record_video" in settings is enabled :
         #       a- convert remaining .ts files in .mp4
-        #       b- merge of .mp4 files in one .mp4
+        #       b- merge .mp4 files in one .mp4
         #       c- rename the only video_idVideo_XXX.mp4 to video_idVideo.mp4
-        #       d- no renaming, no convert .ts->.mp4 to do
+        #       d- no renaming, no convert of .ts->.mp4, no merging of .mp4 to do
 
         #   2- if "record_chat" in settings is enabled :
         #       e- rename the only chat_idVideo_XXX.txt to chat_idVideo.txt
         #       f- no rename to do as no chat files at all or presence of several chat files (in this case, it's up to you to determine manually what to keep/merge)
+        
+        #   3- if "download_files" in settings is enabled :
+        #       g- download files of video
         
         process_videos_Thread = threading.Thread(target=self.process_videos)
         process_videos_Thread.start()
