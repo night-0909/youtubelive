@@ -502,6 +502,7 @@ class Program():
                             break
                 
                 if isRunning is False:
+                    exitLive = False
                     # UPDATE live with dateEnd_YTB if empty
                     dateEnd_YTB = None
                     if live['dateEnd_YTB'] is None:
@@ -559,9 +560,11 @@ class Program():
                         fragment_files_exists = False
                         
                         for record in live['records']:
-                            basefile = self.settings['folder_recording'] + 'video_' + live['idchannel'] + '.' + idVideo + '.' + record['filenumber']
-                            tsfile = basefile + '.ts'
-                            mp4file = basefile + '.mp4'
+                            basefile = self.settings['folder_recording'] + 'video_' + live['idchannel'] + '.' + idVideo
+                            basefilenumber = basefile + '.' + record['filenumber']
+                            tsfile = basefilenumber + '.ts'
+                            mp4file = basefilenumber + '.mp4'
+                            tempmp4file = basefilenumber + '.temp.mp4'
                             if lastRecord['recording_live_tool'] == 'streamlink':
                                 # .ts files
                                 if os.path.isfile(tsfile):
@@ -598,19 +601,27 @@ class Program():
                                     self.writelog(f"id_live={live['id_live']} idVideo={idVideo} .mp4 file present : {mp4file}", 'normal')
                                     mp4files.append(mp4file)
                             elif lastRecord['recording_live_tool'] == 'yt-dlp':
-                                # .mp4 files
+                                # XXX.mp4 file
                                 if os.path.isfile(mp4file):
                                     print(f"id_live={live['id_live']} idVideo={idVideo} .mp4 file present : {mp4file}")
                                     self.writelog(f"id_live={live['id_live']} idVideo={idVideo} .mp4 file present : {mp4file}", 'normal')
                                     mp4files.append(mp4file)
+                                # XXX.temp.mp4 file. yt-dlp is merging audio and video files, we wait merge end and go to next live
+                                elif os.path.isfile(tempmp4file):
+                                    print(f"id_live={live['id_live']} idVideo={idVideo} .temp.mp4 file present (yt-dlp is merging) : {tempmp4file}, we skip")
+                                    self.writelog(f"id_live={live['id_live']} idVideo={idVideo} .temp.mp4 file present (yt-dlp is merging) : {tempmp4file}, we skip", 'normal')
+                                    exitLive = True
                                 else:
-                                    fragment_files = glob.glob(basefile + '.f*.*')
+                                    fragment_files = glob.glob(basefilenumber + '.f*.*')
                                     if len(fragment_files) > 0:
-                                        # If there's a least one file basefile.fXXX.YYY, we don't do the merge automatically. Merge of missing mp4 would have to be
-                                        # done manually with basefile.fXXX.YYY files, then merge all .mp4 files
+                                        # If there's a least one file basefilenumber.fXXX.YYY, we don't do the merge automatically. Merge of missing mp4 would have to be
+                                        # done manually with basefilenumber.fXXX.YYY files, then merge all .mp4 files
                                         print(f"id_live={live['id_live']} idVideo={idVideo} {mp4file} isn't present and there are fragment files ({fragment_files})")
                                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {mp4file} isn't present and there are fragment files ({fragment_files})", 'normal')
                                         fragment_files_exists = True
+                        
+                        if exitLive is True:
+                            continue
                         
                         # Check if there's still some fragment files
                         if lastRecord['recording_live_tool'] == 'yt-dlp':
