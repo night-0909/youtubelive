@@ -296,7 +296,7 @@ class Program():
         logfile.close()
 
     def downloadVideosFiles(self, live):
-        url = "https://www.youtube.com/watch?v=" + live['idVideo']
+        url = "https://www.youtube.com/watch?v=" + live['idVideo']       
         cmd_download = [self.settings['video_tools']['path_yt-dlp'] + 'yt-dlp',
         '--ffmpeg-location', self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', *self.settings['download_files']['yt-dlp_options']]
         
@@ -364,7 +364,7 @@ class Program():
         except Exception as e:
             print(f"[×] Error connecting to database : {e}")
             self.writelog(f"[×] Error connecting to database : {e}", 'normal')
-            self.exitProgram()        
+            self.exitProgram()
         
         if self.settings['download_files']['enabled'] is True:
             downloadThreadList = []            
@@ -380,7 +380,6 @@ class Program():
                 if len(lives_downloading_files_todo) == 0:
                     print("No live needs downloading video files")
                     self.writelog("No live needs downloading video files", 'normal')
-                
                 cursor.close()
             except Error as ex:
                 print(f"Mysql Error SELECT lives with records where video files has to be checked : {ex}")
@@ -408,7 +407,7 @@ class Program():
                         # Start downloading files in a thread 
                         downloadThread = threading.Thread(target=self.downloadVideosFiles, args=[live])
                         downloadThreadList.append(downloadThread)
-                        downloadThread.start()
+                        downloadThread.start()                       
                     else:
                         print(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downlading files")
                         self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downloading files", 'normal')
@@ -552,7 +551,7 @@ class Program():
                                             
                     # Before trying to merge mp4 files together, we make sure for streamlink records that all .ts are converted to .mp4 (case of crash of record_channel.py or error in conversion process in record_channel.py)
                     # and for yt-dlp that we have mp4 file
-                    # We assure that live is not running + wait seconds_before_merge seconds before doing that, because otherwise a stream can be running at the time of the cron
+                    # We assure that live is not running + wait seconds_before_convert seconds before doing that, because otherwise a stream can be running at the time of the cron
                     # and a current .ts can wrongly be converted to .mp4
                     if proc_record_live_tool_exists is False:
                         tsfiles = []
@@ -574,9 +573,9 @@ class Program():
                                     # First, we convert remaining .ts file to .mp4, if success they will be added to mp4files list
                                     timestamp_now = datetime.now().timestamp()
                                     time_diff_seconds = timestamp_now - os.path.getmtime(tsfile)
-                                    if time_diff_seconds > self.settings['process_video']['seconds_before_merge']:
-                                        print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_merge']} seconds but still present : {tsfile}, we convert it to mp4")
-                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_merge']} seconds but still present : {tsfile}, we convert it to mp4", 'normal')
+                                    if time_diff_seconds > self.settings['process_video']['seconds_before_convert']:
+                                        print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_convert']} seconds but still present : {tsfile}, we convert it to mp4")
+                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_convert']} seconds but still present : {tsfile}, we convert it to mp4", 'normal')
                                         new_mp4file = tsfile.replace('.ts', '.mp4')
                                         convert = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-i", tsfile, "-c", "copy", new_mp4file],
                                         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
@@ -591,8 +590,8 @@ class Program():
                                             self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 encountered a problem. convert.returncode={convert.returncode}, isfile={os.path.isfile(new_mp4file)} : {new_mp4file}", 'normal')
                                             tsfiles.append(tsfile)
                                     else:
-                                        print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is younger than {self.settings['process_video']['seconds_before_merge']} seconds so we don't do anything : {tsfile}")
-                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is younger than {self.settings['process_video']['seconds_before_merge']} seconds so we don't do anything : {tsfile}", 'normal')
+                                        print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is younger than {self.settings['process_video']['seconds_before_convert']} seconds so we don't do anything : {tsfile}")
+                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is younger than {self.settings['process_video']['seconds_before_convert']} seconds so we don't do anything : {tsfile}", 'normal')
                                         tsfiles.append(tsfile)
 
                                 # .mp4 files
@@ -647,7 +646,7 @@ class Program():
                             params = {'status_merging_all': 'not_needed'}
                             self.update_live(db, live, params)
                             continue
-                        # We rename the only 001.mp4 to .mp4 if it's older than seconds_before_merge seconds and live is not running
+                        # We rename the only 001.mp4 to .mp4 if it's older than seconds_before_convert seconds and live is not running
                         elif len(mp4files) == 1:
                             print(f"id_live={live['id_live']} idVideo={idVideo} One mp4 found {mp4files[0]}, we will see if we can rename it")
                             self.writelog(f"id_live={live['id_live']} idVideo={idVideo} One mp4 found {mp4files[0]}, we will see if we can rename it", 'normal')
@@ -655,7 +654,7 @@ class Program():
                             if os.path.isfile(mp4files[0]):
                                 timestamp_now = datetime.now().timestamp()
                                 time_diff_seconds = timestamp_now - os.path.getmtime(mp4files[0])
-                                if time_diff_seconds > self.settings['process_video']['seconds_before_merge']:
+                                if time_diff_seconds > self.settings['process_video']['seconds_before_convert']:
                                     if not os.path.isfile(resultmp4file):                            
                                         print(f"id_live={live['id_live']} idVideo={idVideo} We rename mp4 file {mp4files[0]}")
                                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} We rename mp4 file {mp4files[0]}", 'normal')
@@ -668,8 +667,8 @@ class Program():
                                     
                                     self.update_live(db, live, params)
                                 else:
-                                    print(f"id_live={live['id_live']} idVideo={idVideo} mp4 file is not older than {self.settings['process_video']['seconds_before_merge']} seconds, we do not rename mp4 file : {mp4files[0]}")
-                                    self.writelog(f"id_live={live['id_live']} idVideo={idVideo} mp4 file is not older than {self.settings['process_video']['seconds_before_merge']} seconds, we do not rename mp4 file : {mp4files[0]}", 'normal')
+                                    print(f"id_live={live['id_live']} idVideo={idVideo} mp4 file is not older than {self.settings['process_video']['seconds_before_convert']} seconds, we do not rename mp4 file : {mp4files[0]}")
+                                    self.writelog(f"id_live={live['id_live']} idVideo={idVideo} mp4 file is not older than {self.settings['process_video']['seconds_before_convert']} seconds, we do not rename mp4 file : {mp4files[0]}", 'normal')
                             continue
 
                         # Check if there's still a .ts file for this stream
@@ -692,15 +691,14 @@ class Program():
                             self.update_live(db, live, params)
                             continue
 
-                        # Check if last filenumber mp4 is older than seconds_before_merge seconds
+                        # Check if last filenumber mp4 is older than seconds_before_convert seconds
                         if os.path.isfile(lastmp4file):
                             timestamp_now = datetime.now().timestamp()
                             time_diff_seconds = timestamp_now - os.path.getmtime(lastmp4file)
-                            if time_diff_seconds <= self.settings['process_video']['seconds_before_merge']:
+                            if time_diff_seconds <= self.settings['process_video']['seconds_before_convert']:
                                 print(f"id_live={live['id_live']} idVideo={idVideo} Last mp4 file is only {time_diff_seconds} seconds old, we skip")
                                 self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Last mp4 file is only {time_diff_seconds} seconds old, we skip", 'normal')
                                 continue
-                        
                         
                         # *************** Merging mp4 files ******************
                         # Everything is OK, we merge mp4 files
@@ -990,7 +988,7 @@ if __name__ == "__main__":
         },
         'process_video': {
             'enabled' : True,
-            'seconds_before_merge': 60*5 # 5 minutes // Must be > "stream-timeout" from record_channel.py, plus let record_channel.py the time to to convert .ts in mp4
+            'seconds_before_convert': 60*5  # 5 minutes // If streamlink is used, must be > "stream-timeout" from record_channel.py, plus let record_channel.py the time to convert .ts in mp4
         },
         'process_chat': {
             'enabled' : True,
