@@ -196,6 +196,18 @@ class Program():
         
         merge = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-f", "concat", "-safe", "0", "-i", file_list, "-c" , "copy", finalmp4file],
         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        
+        try:
+            db = Database(self.settings['params_database'])
+            connection = db.getConnection()
+        except Exception as e:
+            print(f"[×] Error connecting to database : {e}")
+            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            self.exitProgram()        
+        
+        params = {'status_merging_all': 'ongoing'}
+        self.update_live(db, live, params)        
+        
         merge.wait()
             
         # Get duration of final file : goal is to detect diff in official stream duration, records in DB and duration of temporary files, and duration of merged mp4
