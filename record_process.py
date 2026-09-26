@@ -2,12 +2,13 @@
 
 import scrapetube
 import requests, json, sys, os, psutil, io
+from urllib3.util.retry import Retry
 from datetime import datetime
 import dateutil.parser
 import threading
 import subprocess, glob
 from zoneinfo import ZoneInfo
-from mysql.connector import connect, Error
+import mysql.connector
 
 # Database class
 # Warning : it's not possible to create two concurrent cursors on the same connection then run a statement on each at the same time
@@ -20,7 +21,7 @@ class Database():
         self.connect()
 
     def connect(self):
-        self.connection = connect(
+        self.connection = mysql.connector.connect(
                 host=self.params_database['mysql_host'],
                 user=self.params_database['mysql_user'],
                 password=self.params_database['mysql_pwd'],
@@ -46,6 +47,8 @@ class Program():
         self.tzinfo = ZoneInfo(self.settings['tz'])
         self.initLoggingFile()
         self.initDebug()
+        self.sessionGoogleApis = None        
+        self.initSessionGoogleApis()        
                     
     def initLoggingFile(self):
         loggingfilename = os.path.dirname(os.path.realpath(__file__)) + "/record_process"
@@ -111,6 +114,35 @@ class Program():
         # Write in real time
         self.loggingfile.flush()            
 
+    def initSessionGoogleApis(self):
+        # Youtube Data API V3 can sometimes return HTTP status 400 and 403 whereas request is valid, and sending this same request succeeds.        
+        self.sessionGoogleApis = self.create_session(status_forcelist=(400, 403, 408, 425, 429, 500, 502, 503, 504))
+
+    def create_session(
+        self,
+        retries=3,
+        backoff_factor=1,
+        backoff_jitter=0.5,
+        allowed_methods=frozenset(["GET", "POST", "HEAD", "OPTIONS"]),
+        status_forcelist=(408, 425, 429, 500, 502, 503, 504),
+    ):
+        """Return a requests Session with sensible retry and backoff defaults."""
+        session = requests.Session()
+
+        retry = Retry(
+            total=retries,
+            backoff_factor=backoff_factor,
+            backoff_jitter=backoff_jitter,
+            allowed_methods=allowed_methods,
+            status_forcelist=status_forcelist,
+            raise_on_status=False
+        )
+
+        adapter = requests.adapters.HTTPAdapter(max_retries=retry)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
+          
     # Used when errors/exceptions occured and when we want to exit right now
     def exitProgram(self):
         self.writelog("Execution had errors")
@@ -188,8 +220,8 @@ class Program():
 
     def merge_mp4files(self, live, mp4files):   
         idVideo = live['idVideo']
-        file_list = self.settings['folder_recording'] + 'filelist_' + live['idchannel'] + '.' + idVideo + '.txt'
-        finalmp4file = self.settings['folder_recording'] + 'video_' + live['idchannel'] + '.' + idVideo + '.mp4'
+        file_list = f"{self.settings['folder_recording']}filelist_{live['idchannel']}.{idVideo}.txt"
+        finalmp4file = f"{self.settings['folder_recording']}video_{live['idchannel']}.{idVideo}.mp4"
 
         print(f"id_live={live['id_live']} idVideo={idVideo} Starting merge of mp4 files...")
         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Starting merge of mp4 files...", 'normal')
@@ -236,11 +268,12 @@ class Program():
             self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Merge was done without error", 'normal')
             
             live['status_merging_all'] = "finished"
-            os.remove(file_list)
-            for mp4file in mp4files:
-                if os.path.basename(mp4file) != os.path.basename(finalmp4file):
-                    print("delete file " + mp4file)
-                    os.remove(mp4file)
+            # Important : keep files in case something wrong is happening and original files are needed
+            # os.remove(file_list)
+            #for mp4file in mp4files:
+            #    if os.path.basename(mp4file) != os.path.basename(finalmp4file):
+            #        print("delete file " + mp4file)
+                    #os.remove(mp4file)
         else:
             # It would be nice to get stdout of merge command, see record_channel.py in recordLive() function
             print(f"id_live={live['id_live']} idVideo={idVideo} Merge had error : {merge.returncode}")
@@ -268,15 +301,15 @@ class Program():
             cursor.execute(update_live_query, list(params.values()))
             connection.commit()
             cursor.close()
-        except Error as ex:
-            print(f"id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new status of merging : {ex}")
-            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new status of merging : {ex}", 'normal')
+        except mysql.connector.Error as ex:
+            print(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new status of merging : {ex}")
+            self.writelog(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new status of merging : {ex}", 'normal')
             self.exitProgram()              
             
         # Close Mysql connection
         try:
             connection.close()
-        except Error as ex:
+        except mysql.connector.Error as ex:
             pass
         
     def update_live(self, db, live, params):
@@ -289,9 +322,9 @@ class Program():
             cursor.execute(update_live_query, list(params.values()))
             connection.commit()
             cursor.close()
-        except Error as ex:
-            print(f"id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new values {params} : {ex}")
-            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new values {params} : {ex}", 'normal')
+        except mysql.connector.Error as ex:
+            print(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new values {params} : {ex}")
+            self.writelog(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new values {params} : {ex}", 'normal')
             self.exitProgram()                      
 
     def process_logfile(self, process, filename):
@@ -323,7 +356,7 @@ class Program():
             downloadProcess = subprocess.Popen(cmd_download, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
             # Record yt-dlp stderr and stdout to file
-            logfile = self.settings['folder_recording'] + 'downloading_files_' + live['idVideo'] + '.log'
+            logfile = f"{self.settings['folder_recording']}downloading_files_{live['idVideo']}.log"
             dl_yt_dlp_logfile_thread = threading.Thread(target=self.process_logfile, args=(downloadProcess, logfile))
             dl_yt_dlp_logfile_thread.start()
         except Exception as e:
@@ -393,9 +426,9 @@ class Program():
                     print("No live needs downloading video files")
                     self.writelog("No live needs downloading video files", 'normal')
                 cursor.close()
-            except Error as ex:
-                print(f"Mysql Error SELECT lives with records where video files has to be checked : {ex}")
-                self.writelog(f"Mysql Error SELECT lives with records where video files has to be checked : {ex}", 'normal')
+            except mysql.connector.Error as ex:
+                print(f"[x] Mysql Error SELECT lives with records where video files has to be checked : {ex}")
+                self.writelog(f"[x] Mysql Error SELECT lives with records where video files has to be checked : {ex}", 'normal')
                 self.exitProgram()
 
             if len(lives_downloading_files_todo) > 0:
@@ -404,13 +437,14 @@ class Program():
                 for live in lives_downloading_files_todo:
                     isRunning = False
                     try:
-                        streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, sort_by="newest")
+                        streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, cookies=self.settings['cookies'], sort_by="newest")
+                        list_streams = list(streams)
                     except Exception as e:
                         print(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
                         self.writelog(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
                         continue
                     
-                    for stream in streams:
+                    for stream in list_streams:
                         if live['idVideo'] == stream['videoId'] and stream['is_live'] is True:
                             isRunning = True
                             break
@@ -433,7 +467,7 @@ class Program():
         
         if self.settings['process_video']['enabled'] is False:
             print(f"Processing of videos files is disabled")
-            self.writelog(f"Processing if videos files is disabled", 'normal')
+            self.writelog(f"Processing of videos files is disabled", 'normal')
             return
         
         try:
@@ -460,9 +494,9 @@ class Program():
                 # Assemble an array with lives as parents and records as children
                 lives_records_todo = self.arrangeListRecords(lives_records_todo)
             cursor.close()
-        except Error as ex:
-            print(f"Mysql Error SELECT lives with records where video files has to be checked : {ex}")
-            self.writelog(f"Mysql Error SELECT lives with records where video files has to be checked : {ex}", 'normal')
+        except mysql.connector.Error as ex:
+            print(f"[x] Mysql Error SELECT lives with records where video files has to be checked : {ex}")
+            self.writelog(f"[x] Mysql Error SELECT lives with records where video files has to be checked : {ex}", 'normal')
             self.exitProgram()
 
         if len(lives_records_todo) > 0:
@@ -487,8 +521,8 @@ class Program():
                
                 # Debug info from last record
                 lastfilenumbervideo = lastRecord['filenumber']
-                lastmp4file = self.settings['folder_recording'] + 'video_' + live['idchannel'] + '.' + idVideo + '.' + lastfilenumbervideo + '.mp4'
-                resultmp4file = self.settings['folder_recording'] + 'video_' + live['idchannel'] + '.' + idVideo + '.mp4'
+                lastmp4file = f"{self.settings['folder_recording']}video_{live['idchannel']}.{idVideo}.{lastfilenumbervideo}.mp4"
+                resultmp4file = f"{self.settings['folder_recording']}video_{live['idchannel']}.{idVideo}.mp4"
                 print(f"id_live={live['id_live']} idVideo={idVideo} lastmp4file : {lastmp4file}")
                 self.writelog(f"id_live={live['id_live']} idVideo={idVideo} lastmp4file : {lastmp4file}", 'normal')
                 print(f"id_live={live['id_live']} idVideo={idVideo} resultmp4file : {resultmp4file}")
@@ -501,13 +535,14 @@ class Program():
                     # 2 streams can be running at the same time on same channel
                     # Get last streams of channel
                     try:
-                        streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, sort_by="newest")
+                        streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, cookies=self.settings['cookies'], sort_by="newest")
+                        list_streams = list(streams)
                     except Exception as e:
                         print(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
                         self.writelog(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
                         continue
                     
-                    for stream in streams:
+                    for stream in list_streams:
                         if idVideo == stream['videoId'] and stream['is_live'] is True:
                             isRunning = True
                             break
@@ -521,7 +556,7 @@ class Program():
                         "&part=snippet,contentDetails,statistics,liveStreamingDetails"
                         print(videosInfosURL)
                         try:
-                            response = requests.get(videosInfosURL)
+                            response = self.sessionGoogleApis.get(videosInfosURL, timeout=(3.05, 20))
                             videosInfosResponse = response.text
                             if response.status_code == 200:
                                 video_json = json.loads(videosInfosResponse)       
@@ -544,40 +579,44 @@ class Program():
                                 cursor.execute(update_live_query, list(params.values()))
                                 connection.commit()
                                 cursor.close()
-                            except Error as ex:
-                                print(f"id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}")
-                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}", 'normal')
+                            except mysql.connector.Error as ex:
+                                print(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}")
+                                self.writelog(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}", 'normal')
                                 self.exitProgram()
     
-                    # Check if record_live_tool process has terminated
-                    proc_record_live_tool_exists = False
-                    if lastRecord['recording_pid'] is not None and psutil.pid_exists(lastRecord['recording_pid']) is True:
-                        try:
-                            proc = psutil.Process(lastRecord['recording_pid'])
-                            if proc.cmdline()[1] == self.settings['record_video']['path_' + lastRecord['recording_live_tool']] + lastRecord['recording_live_tool'] and url in proc.cmdline():
-                                proc_record_live_tool_exists = True
-                        except Exception as e:
-                            print(f"[×] idVideo={stream['videoId']} Impossible to get {lastRecord['recording_live_tool']} process informations for video recording : {e}")
-                            self.writelog(f"[×] idVideo={stream['videoId']} Impossible to get {lastRecord['recording_live_tool']} process informations for video recording : {e}", 'normal')
-                            # We continue normally
+                    # Check if all processes of record_live_tool for this live have terminated
+                    proc_record_live_tool_running = []
+                    for liveRecord in live['records']:                   
+                        if liveRecord['recording_pid'] is not None and psutil.pid_exists(liveRecord['recording_pid']) is True:
+                            try:
+                                proc = psutil.Process(liveRecord['recording_pid'])
+                                if (proc.cmdline()[1] == self.settings['video_tools']['path_' + liveRecord['recording_live_tool']] + liveRecord['recording_live_tool']
+                                and url in proc.cmdline()
+                                and any(arg.startswith(f"{self.settings['folder_recording']}video_{self.idchannel}.{liveRecord['idVideo']}.{liveRecord['filenumber']}.") for arg in proc.cmdline())
+                                ):
+                                    proc_record_live_tool_running.append(liveRecord)
+                            except Exception as e:
+                                print(f"[×] id_live={live['id_live']} idVideo={idVideo} Impossible to get {liveRecord['recording_live_tool']} process (PID={liveRecord['recording_pid']}) informations for video recording : {e}")
+                                self.writelog(f"[×] id_live={live['id_live']} idVideo={idVideo} Impossible to get {liveRecord['recording_live_tool']} process (PID={liveRecord['recording_pid']}) informations for video recording : {e}", 'normal')
+                                # We continue normally
                                             
                     # Before trying to merge mp4 files together, we make sure for streamlink records that all .ts are converted to .mp4 (case of crash of record_channel.py or error in conversion process in record_channel.py)
-                    # and for yt-dlp that we have mp4 file
-                    # We assure that live is not running + wait seconds_before_convert seconds before doing that, because otherwise a stream can be running at the time of the cron
-                    # and a current .ts can wrongly be converted to .mp4
-                    if proc_record_live_tool_exists is False:
+                    # and for yt-dlp that we have mp4 files in MPEG-4 format and not MPEG-TS (case where yt-dlp didn't do it)
+                    # In addition to wait termination of all processes of record_live_tool, we wait seconds_before_convert seconds before doing that, as a security
+                    if len(proc_record_live_tool_running) == 0:
                         tsfiles = []
                         mp4files = []
-                        fragment_files_exists = False
+                        mp4_mpegts_files = []
+                        f_files_without_merge = []
                         
                         for record in live['records']:
-                            basefile = self.settings['folder_recording'] + 'video_' + live['idchannel'] + '.' + idVideo
-                            basefilenumber = basefile + '.' + record['filenumber']
-                            tsfile = basefilenumber + '.ts'
-                            mp4file = basefilenumber + '.mp4'
-                            tempmp4file = basefilenumber + '.temp.mp4'
+                            basefile = f"{self.settings['folder_recording']}video_{live['idchannel']}.{idVideo}"
+                            basefilenumber = f"{basefile}.{record['filenumber']}"
+                            tsfile = f"{basefilenumber}.ts"
+                            mp4file = f"{basefilenumber}.mp4"
+                            tempmp4file = f"{basefilenumber}.temp.mp4"
                             if lastRecord['recording_live_tool'] == 'streamlink':
-                                # .ts files
+                                # XXX.ts files
                                 if os.path.isfile(tsfile):
                                     print(f"id_live={live['id_live']} idVideo={idVideo} .ts file present : {tsfile}")
                                     self.writelog(f"id_live={live['id_live']} idVideo={idVideo} .ts file present : {tsfile}", 'normal')                        
@@ -588,25 +627,28 @@ class Program():
                                     if time_diff_seconds > self.settings['process_video']['seconds_before_convert']:
                                         print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_convert']} seconds but still present : {tsfile}, we convert it to mp4")
                                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_convert']} seconds but still present : {tsfile}, we convert it to mp4", 'normal')
-                                        new_mp4file = tsfile.replace('.ts', '.mp4')
-                                        convert = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-i", tsfile, "-c", "copy", new_mp4file],
+
+                                        convert = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-i", tsfile, "-c", "copy", mp4file],
                                         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
                                         convert.wait()
                                         
-                                        if convert.returncode == 0 and os.path.isfile(new_mp4file) is True:
-                                            print(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 succeeded : {new_mp4file}")
-                                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 succeeded : {new_mp4file}", 'normal')
-                                            os.remove(tsfile)
+                                        if convert.returncode == 0 and os.path.isfile(mp4file) is True:
+                                            print(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 succeeded : {mp4file}")
+                                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 succeeded : {mp4file}", 'normal')
+                                            # Important : keep files in case something wrong is happening and original files are needed
+                                            #os.remove(tsfile)
+                                            os.rename(tsfile, tsfile + '.old')
+                                            mp4files.append(mp4file)
                                         else:
-                                            print(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 encountered a problem. convert.returncode={convert.returncode}, isfile={os.path.isfile(new_mp4file)} : {new_mp4file}")
-                                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 encountered a problem. convert.returncode={convert.returncode}, isfile={os.path.isfile(new_mp4file)} : {new_mp4file}", 'normal')
+                                            print(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 encountered a problem. convert.returncode={convert.returncode}, isfile={os.path.isfile(mp4file)} : {mp4file}")
+                                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .ts file to mp4 encountered a problem. convert.returncode={convert.returncode}, isfile={os.path.isfile(mp4file)} : {mp4file}", 'normal')
                                             tsfiles.append(tsfile)
                                     else:
                                         print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is younger than {self.settings['process_video']['seconds_before_convert']} seconds so we don't do anything : {tsfile}")
                                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is younger than {self.settings['process_video']['seconds_before_convert']} seconds so we don't do anything : {tsfile}", 'normal')
                                         tsfiles.append(tsfile)
 
-                                # .mp4 files
+                                # XXX.mp4 files
                                 if os.path.isfile(mp4file):
                                     print(f"id_live={live['id_live']} idVideo={idVideo} .mp4 file present : {mp4file}")
                                     self.writelog(f"id_live={live['id_live']} idVideo={idVideo} .mp4 file present : {mp4file}", 'normal')
@@ -616,39 +658,90 @@ class Program():
                                 if os.path.isfile(mp4file):
                                     print(f"id_live={live['id_live']} idVideo={idVideo} .mp4 file present : {mp4file}")
                                     self.writelog(f"id_live={live['id_live']} idVideo={idVideo} .mp4 file present : {mp4file}", 'normal')
-                                    mp4files.append(mp4file)
+                                    
+                                    # We verify that each mp4 are in MPEG-4 format and not MPEG-TS. If yes, we wait seconds_before_convert, then we convert it in MPEG-4
+ 
+                                    # Check if file is in MPEG-TS format
+                                    formatFileMP4 = None
+                                    processGetInfoMP4 = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffprobe', '-v', 'error', '-show_entries', 'format=format_name',  '-of',
+                                    'default=noprint_wrappers=1:nokey=1', mp4file],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                    stdout, stderr = processGetInfoMP4.communicate()
+                                    formatFileMP4 = str(stdout.strip())
+                                    
+                                    if formatFileMP4 == "mpegts":
+                                        print(f"[×] idVideo={record['idVideo']} {mp4file} is in MPEG-TS format, it needs to be converted in MPEG-4 format")
+                                        self.writelog(f"[×] idVideo={record['idVideo']} {mp4file} is in MPEG-TS format, it needs to be converted in MPEG-4 format", 'normal')
+                                        
+                                        timestamp_now = datetime.now().timestamp()
+                                        time_diff_seconds = timestamp_now - os.path.getmtime(mp4file)
+                                        if time_diff_seconds > self.settings['process_video']['seconds_before_convert']:
+                                            print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, {mp4file} is older than {self.settings['process_video']['seconds_before_convert']} seconds but in MPEG-TS format, we convert it to mp4")
+                                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, {mp4file} is older than {self.settings['process_video']['seconds_before_convert']} seconds but in MPEG-TS format, we convert it to mp4", 'normal')
+                                                                                       
+                                            convert = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-i", mp4file, "-c", "copy", tempmp4file],
+                                            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+                                            convert.wait()
+                                            
+                                            if convert.returncode == 0 and os.path.isfile(tempmp4file) is True:
+                                                print(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .mp4 in MPEG-TS format to MPEG-4 format succeeded : {tempmp4file}")
+                                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .mp4 in MPEG-TS format to MPEG-4 format succeeded : {tempmp4file}", 'normal')
+                                                # Important : keep files in case something wrong is happening and original files are needed
+                                                os.rename(mp4file, mp4file + '.old')
+                                                os.rename(tempmp4file, mp4file)
+                                                mp4files.append(mp4file)
+                                            else:
+                                                print(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .mp4 in MPEG-TS format to MPEG-4 format encountered a problem. convert.returncode={convert.returncode}, isfile={os.path.isfile(tempmp4file)} : {tempmp4file}")
+                                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Convert remaining .mp4 in MPEG-TS format to MPEG-4 format encountered a problem. convert.returncode={convert.returncode}, isfile={os.path.isfile(tempmp4file)} : {tempmp4file}", 'normal')
+                                                mp4_mpegts_files.append(mp4file)
+                                        else:
+                                            mp4_mpegts_files.append(mp4file)
+                                    else:
+                                        mp4files.append(mp4file)
+                                                
                                 # XXX.temp.mp4 file. yt-dlp is merging audio and video files, we wait merge end and go to next live
                                 elif os.path.isfile(tempmp4file):
-                                    print(f"id_live={live['id_live']} idVideo={idVideo} .temp.mp4 file present (yt-dlp is merging) : {tempmp4file}, we skip")
-                                    self.writelog(f"id_live={live['id_live']} idVideo={idVideo} .temp.mp4 file present (yt-dlp is merging) : {tempmp4file}, we skip", 'normal')
+                                    print(f"id_live={live['id_live']} idVideo={idVideo} {tempmp4file} file present (yt-dlp is merging), we skip")
+                                    self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {tempmp4file} file present (yt-dlp is merging), we skip", 'normal')
                                     exitLive = True
                                 else:
-                                    fragment_files = glob.glob(basefilenumber + '.f*.*')
+                                    fragment_files = glob.glob(f"{basefilenumber}.f*.*")
                                     if len(fragment_files) > 0:
                                         # If there's a least one file basefilenumber.fXXX.YYY, we don't do the merge automatically. Merge of missing mp4 would have to be
                                         # done manually with basefilenumber.fXXX.YYY files, then merge all .mp4 files
+                                        # To do it, see ffmpeg.py in yt-dlp source code
                                         print(f"id_live={live['id_live']} idVideo={idVideo} {mp4file} isn't present and there are fragment files ({fragment_files})")
                                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {mp4file} isn't present and there are fragment files ({fragment_files})", 'normal')
-                                        fragment_files_exists = True
+                                        f_files_without_merge.append(fragment_files)
                         
                         if exitLive is True:
                             continue
                         
-                        # Check if there's still some fragment files
+                        # For yt-dlp, check if there are still some fragment files with no XXX.mp4 or XXX.temp.mp4
                         if lastRecord['recording_live_tool'] == 'yt-dlp':
-                            if fragment_files_exists is True:
-                                print(f"id_live={live['id_live']} idVideo={idVideo} There are fragment files, we don't merge files automatically.")
-                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} There are fragment files, we don't merge files automatically.", 'normal')
+                            if len(f_files_without_merge) > 0:
+                                print(f"id_live={live['id_live']} idVideo={idVideo} There are fragment files with no terminated or running mp4 merge, we don't merge files automatically. Fragment files={f_files_without_merge}")
+                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} There are fragment files with no terminated or running mp4 merge, we don't merge files automatically. Fragment files={f_files_without_merge}", 'normal')
                                 params = {'status_merging_all': 'need_to_fix'}
                                 self.update_live(db, live, params)                            
                                 continue
                         
-                        # Check if there's still at leat one .ts file for this stream
+                        # For yt-dlp, check if there are still mp4 in MPEG-TS format
+                        if lastRecord['recording_live_tool'] == 'yt-dlp':
+                            if len(mp4_mpegts_files) > 0:
+                                print(f"id_live={live['id_live']} idVideo={idVideo} There are mp4 files that are still in MPEG-TS format, we don't merge files automatically. MP4 MPEG-TS files={mp4_mpegts_files}")
+                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} There are mp4 files that are still in MPEG-TS format, we don't merge files automatically. MP4 MPEG-TS files={mp4_mpegts_files}", 'normal')
+                                params = {'status_merging_all': 'need_to_fix'}
+                                self.update_live(db, live, params)                            
+                                continue
+                        
+                        # For streamlink, check if there's still at leat one .ts file for this stream
                         # We let this script try again this stream in the future
-                        if len(tsfiles) > 0:
-                            print(f"id_live={live['id_live']} idVideo={idVideo} There's still at least one .ts file, we don't merge. tsfiles : {tsfiles}")
-                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} There's still at least one .ts file, we don't merge. tsfiles : {tsfiles}", 'normal')
-                            continue
+                        if lastRecord['recording_live_tool'] == 'streamlink':
+                            if len(tsfiles) > 0:
+                                print(f"id_live={live['id_live']} idVideo={idVideo} There's still at least one .ts file, we don't merge. tsfiles : {tsfiles}")
+                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} There's still at least one .ts file, we don't merge. tsfiles : {tsfiles}", 'normal')
+                                continue
                         
                         # To merge mp4s, we need more than one mp4 file. If only one mp4, we only rename .001.mp4 to .mp4 and exit
                         # mp4 files are sorted by id_record ASC
@@ -658,7 +751,7 @@ class Program():
                             params = {'status_merging_all': 'not_needed'}
                             self.update_live(db, live, params)
                             continue
-                        # We rename the only 001.mp4 to .mp4 if it's older than seconds_before_convert seconds and live is not running
+                        # We rename the only 001.mp4 to .mp4 if it's older than seconds_before_convert seconds
                         elif len(mp4files) == 1:
                             print(f"id_live={live['id_live']} idVideo={idVideo} One mp4 found {mp4files[0]}, we will see if we can rename it")
                             self.writelog(f"id_live={live['id_live']} idVideo={idVideo} One mp4 found {mp4files[0]}, we will see if we can rename it", 'normal')
@@ -673,8 +766,8 @@ class Program():
                                         os.rename(mp4files[0], resultmp4file)
                                         params = {'status_merging_all': 'finished'}
                                     else:
-                                        print(f"id_live={live['id_live']} idVideo={idVideo} mp4 filename already exists, we don't rename mp4 file {mp4files[0]}")
-                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} mp4 filename already exists, we don't rename mp4 file {mp4files[0]}", 'normal')
+                                        print(f"id_live={live['id_live']} idVideo={idVideo} {resultmp4file} already exists, we don't rename it")
+                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {resultmp4file} already exists, we don't rename it", 'normal')
                                         params = {'status_merging_all': 'not_needed'}
                                     
                                     self.update_live(db, live, params)
@@ -682,20 +775,8 @@ class Program():
                                     print(f"id_live={live['id_live']} idVideo={idVideo} mp4 file is not older than {self.settings['process_video']['seconds_before_convert']} seconds, we do not rename mp4 file : {mp4files[0]}")
                                     self.writelog(f"id_live={live['id_live']} idVideo={idVideo} mp4 file is not older than {self.settings['process_video']['seconds_before_convert']} seconds, we do not rename mp4 file : {mp4files[0]}", 'normal')
                             continue
-
-                        # Check if there's still a .ts file for this stream
-                        if len(tsfiles) > 0:
-                            print(f"id_live={live['id_live']} idVideo={idVideo} There's still at least one .ts file, we don't merge. tsfiles : {tsfiles}")
-                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} There's still at least one .ts file, we don't merge. tsfiles : {tsfiles}", 'normal')
-                            continue
-                        
-                        # Check if merge of all mp4 hasn't been already done // To do it again clear status_merging_all field
-                        if live['status_merging_all'] is not None:
-                            print(f"id_live={live['id_live']} idVideo={idVideo} No merging to do, actual status_merging_all is : {live['status_merging_all']}")
-                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} No merging to do, actual status_merging_all is : {live['status_merging_all']}", 'normal')
-                            continue
-                            
-                        # Check if there's not already a final .mp4 file present
+                                                  
+                        # Check if there's not already a {idVideo}.mp4 file present
                         if os.path.isfile(resultmp4file):
                             print(f"id_live={live['id_live']} idVideo={idVideo} one final .mp4 is already present, we don't merge. resultmp4file : {resultmp4file}")
                             self.writelog(f"id_live={live['id_live']} idVideo={idVideo} one final .mp4 is already present, we don't merge. resultmp4file : {resultmp4file}", 'normal')
@@ -703,15 +784,16 @@ class Program():
                             self.update_live(db, live, params)
                             continue
 
-                        # Check if last filenumber mp4 is older than seconds_before_convert seconds
-                        if os.path.isfile(lastmp4file):
+                        # Check if last XXX.mp4 recorded is older than seconds_before_convert seconds
+                        lastmp4file_recorded = mp4files[-1]
+                        if os.path.isfile(lastmp4file_recorded):
                             timestamp_now = datetime.now().timestamp()
-                            time_diff_seconds = timestamp_now - os.path.getmtime(lastmp4file)
+                            time_diff_seconds = timestamp_now - os.path.getmtime(lastmp4file_recorded)
                             if time_diff_seconds <= self.settings['process_video']['seconds_before_convert']:
-                                print(f"id_live={live['id_live']} idVideo={idVideo} Last mp4 file is only {time_diff_seconds} seconds old, we skip")
-                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Last mp4 file is only {time_diff_seconds} seconds old, we skip", 'normal')
+                                print(f"id_live={live['id_live']} idVideo={idVideo} Last mp4 recorded file {lastmp4file_recorded} is only {time_diff_seconds} seconds old, we skip")
+                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Last mp4 recorded file {lastmp4file_recorded} is only {time_diff_seconds} seconds old, we skip", 'normal')
                                 continue
-                        
+                            
                         # *************** Merging mp4 files ******************
                         # Everything is OK, we merge mp4 files
                         print(f"id_live={live['id_live']} idVideo={idVideo} Merge process is needed")
@@ -719,12 +801,12 @@ class Program():
                         
                         file_list_string = ''
                         for mp4file in mp4files:
-                            file_list_string = file_list_string + "file '" + mp4file + "'\n"
+                            file_list_string = f"{file_list_string}file '{mp4file}'\n"
 
                         print(f"id_live={live['id_live']} idVideo={idVideo} file_list_string : {file_list_string}")
                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} file_list_string : {file_list_string}", 'normal')
 
-                        file_list = self.settings['folder_recording'] + 'filelist_' + live['idchannel'] + '.' + idVideo + '.txt'
+                        file_list = f"{self.settings['folder_recording']}filelist_{live['idchannel']}.{idVideo}.txt"
                         f = open(file_list, "w", encoding="utf-8")
                         f.write(file_list_string)
                         f.close()
@@ -733,8 +815,8 @@ class Program():
                         mergeThreadList.append(mergeThread)
                         mergeThread.start()                       
                     else:
-                        print(f"id_live={live['id_live']} idVideo={idVideo} {lastRecord['recording_live_tool']} is still running, we skip video processing")
-                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {lastRecord['recording_live_tool']} is still running, we skip video processing", 'normal')
+                        print(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_record_live_tool_running)} processes of {lastRecord['recording_live_tool']} are still running, we skip video processing. Processes={proc_record_live_tool_running}")
+                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_record_live_tool_running)} processes of {lastRecord['recording_live_tool']} are still running, we skip video processing. Processes={proc_record_live_tool_running}", 'normal')
                 else:
                     print(f"id_live={live['id_live']} idVideo={idVideo} Stream is still up on Youtube, we skip video processing")
                     self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Stream is still up on Youtube, we skip video processing", 'normal')
@@ -746,7 +828,7 @@ class Program():
         # Close Mysql connection
         try:
             connection.close()
-        except Error as ex:
+        except mysql.connector.Error as ex:
             pass
         
     def process_chats(self):
@@ -781,9 +863,9 @@ class Program():
                 # Assemble an array with lives as parents and chats as children
                 lives_chats_todo = self.arrangeListChats(lives_chats_todo)
             cursor.close()
-        except Error as ex:
-            print(f"Mysql Error SELECT lives with chats with renaming to check : {ex}")
-            self.writelog(f"Mysql Error SELECT lives with chats with renaming to check : {ex}", 'normal')
+        except mysql.connector.Error as ex:
+            print(f"[x] Mysql Error SELECT lives with chats with renaming to check : {ex}")
+            self.writelog(f"[x] Mysql Error SELECT lives with chats with renaming to check : {ex}", 'normal')
             self.exitProgram()
 
         if len(lives_chats_todo) > 0:
@@ -807,8 +889,8 @@ class Program():
                 
                 # Debug info from last chat
                 lastfilenumberchat = lastChat['filenumber']
-                lastchatfile = self.settings['folder_recording'] + 'chat_' + live['idchannel'] + '.' + idVideo + '.' + lastfilenumberchat + '.txt'
-                resultchatfile = self.settings['folder_recording'] + 'chat_' + live['idchannel'] + '.' + idVideo + '.txt'
+                lastchatfile = f"{self.settings['folder_recording']}chat_{live['idchannel']}.{idVideo}.{lastfilenumberchat}.txt"
+                resultchatfile = f"{self.settings['folder_recording']}chat_{live['idchannel']}.{idVideo}.txt"
                 print(f"id_live={live['id_live']} idVideo={idVideo} lastchatfile : {lastchatfile}")
                 self.writelog(f"id_live={live['id_live']} idVideo={idVideo} lastchatfile : {lastchatfile}", 'normal')
                 print(f"id_live={live['id_live']} idVideo={idVideo} resultchatfile : {resultchatfile}")
@@ -820,11 +902,18 @@ class Program():
                     # It can be replaced by a call to Youtube API V3 /videos or a call to YTB video url and get videoDetails->isLive
                     # 2 streams can be running at the same time on same channel
                     # Get last streams of channel
-                    streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, sort_by="newest")
-                    for stream in streams:
+                    try:
+                        streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, cookies=self.settings['cookies'], sort_by="newest")
+                        list_streams = list(streams)
+                    except Exception as e:
+                        print(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
+                        self.writelog(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
+                        continue
+                        
+                    for stream in list_streams:
                         if idVideo == stream['videoId'] and stream['is_live'] is True:
                             isRunning = True
-                            break   
+                            break
 
                 if isRunning is False:
                     # UPDATE live with dateEnd_YTB if empty
@@ -834,7 +923,7 @@ class Program():
                         "&part=snippet,contentDetails,statistics,liveStreamingDetails"
                         print(videosInfosURL)
                         try:
-                            response = requests.get(videosInfosURL)
+                            response = self.sessionGoogleApis.get(videosInfosURL, timeout=(3.05, 20))
                             videosInfosResponse = response.text
                             if response.status_code == 200:
                                 video_json = json.loads(videosInfosResponse)       
@@ -857,28 +946,32 @@ class Program():
                                 cursor.execute(update_live_query, list(params.values()))
                                 connection.commit()
                                 cursor.close()
-                            except Error as ex:
-                                print(f"id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}")
-                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}", 'normal')
+                            except mysql.connector.Error as ex:
+                                print(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}")
+                                self.writelog(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}", 'normal')
                                 self.exitProgram()
 
-                    # Check if chat_downloader process has terminated
-                    procChatExists = False
-                    if lastChat['chat_pid'] is not None and psutil.pid_exists(lastChat['chat_pid']) is True:
-                        try:
-                            proc = psutil.Process(lastChat['chat_pid'])
-                            if proc.cmdline()[1] == self.settings['process_chat']['path_chat_downloader'] + 'chat_downloader' and url in proc.cmdline():
-                                procChatExists = True                            
-                        except Exception as e:
-                            print(f"[×] idVideo={stream['videoId']} Impossible to get Python process informations for chat recording : {e}")
-                            self.writelog(f"[×] idVideo={stream['videoId']} Impossible to get Python process informations for chat recording : {e}", 'normal')
-                            # We continue normally            
+                    # Check if all processes of chat_downloader for this live have terminated
+                    proc_chat_running = []
+                    for chat in live['chats']:
+                        if chat['chat_pid'] is not None and psutil.pid_exists(chat['chat_pid']) is True:
+                            try:
+                                proc = psutil.Process(chat['chat_pid'])
+                                if (proc.cmdline()[1] == self.settings['record_chat']['path_chat_downloader'] + 'chat_downloader'
+                                and url in proc.cmdline()
+                                and any(arg.startswith(f"{self.settings['folder_recording']}chat_{self.idchannel}.{chat['idVideo']}.{chat['filenumber']}.txt") for arg in proc.cmdline())
+                                ):
+                                    proc_chat_running.append(chat)
+                            except Exception as e:
+                                print(f"[×] id_live={live['id_live']} idVideo={idVideo} Impossible to get chat_downloader process (PID={chat['chat_pid']}) informations for chat recording : {e}")
+                                self.writelog(f"[×] id_live={live['id_live']} idVideo={idVideo} Impossible to get chat_downloader process (PID={chat['chat_pid']}) informations for chat recording : {e}", 'normal')
+                                # We continue normally            
 
-                    # We assure that live is not running + wait seconds_before_rename_chat before doing something
-                    if procChatExists is False:
+                    # We wait seconds_before_rename_chat before doing something
+                    if len(proc_chat_running) == 0:
                         chatfiles = []
                         for chat in live['chats']:
-                            chatfile = self.settings['folder_recording'] + 'chat_' + live['idchannel'] + '.' + idVideo + '.' + chat['filenumber'] + '.txt'
+                            chatfile = f"{self.settings['folder_recording']}chat_{live['idchannel']}.{idVideo}.{chat['filenumber']}.txt"
                             if os.path.isfile(chatfile):
                                 print(f"id_live={live['id_live']} idVideo={idVideo} chat file present : {chatfile}")
                                 self.writelog(f"id_live={live['id_live']} idVideo={idVideo} chat file present : {chatfile}", 'normal')
@@ -927,9 +1020,9 @@ class Program():
                         # UPDATE status_rename_chat
                         if update_status_rename_chat is True:
                             self.update_live(db, live, params)
-                    else:
-                        print(f"id_live={live['id_live']} idVideo={idVideo} chat_downloader is still running, we skip chat processing")
-                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} chat_downloader is still running, we skip chat processing", 'normal')
+                    else:                       
+                        print(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_record_live_tool_running)} processes of chat_downloader are still running, we skip chat processing. Processes={proc_record_live_tool_running}")
+                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_record_live_tool_running)} processes of chat_downloader are still running, we skip chat processing. Processes={proc_record_live_tool_running}", 'normal')
                 else:
                     print(f"id_live={live['id_live']} idVideo={idVideo} Stream is still up on Youtube, we skip chat processing")
                     self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Stream is still up on Youtube, we skip chat processing", 'normal')
@@ -937,7 +1030,7 @@ class Program():
         # Close Mysql connection
         try:
             connection.close()
-        except Error as ex:
+        except mysql.connector.Error as ex:
             pass
         
     # *************** Main program ******************
@@ -950,18 +1043,19 @@ class Program():
         # If you want to do again a treatment on a live, clear "status_" fields in lives table
         
         # Possible cases :
-        #   1- if "record_video" in settings is enabled :
+        #   1- if "process_video" in settings is enabled :
         #       a- convert remaining .ts files in .mp4
-        #       b- merge .mp4 files in one .mp4
-        #       c- rename the only video_idVideo_XXX.mp4 to video_idVideo.mp4
-        #       d- no renaming, no convert of .ts->.mp4, no merging of .mp4 to do
+        #       b- convert remaining .mp4 in MPEG-TS format in MPEG-4
+        #       c- merge .mp4 files in one .mp4
+        #       d- rename the only video_idVideo_XXX.mp4 to video_idVideo.mp4
+        #       e- no renaming, no convert of .ts->.mp4, no merging of .mp4 to do
 
-        #   2- if "record_chat" in settings is enabled :
-        #       e- rename the only chat_idVideo_XXX.txt to chat_idVideo.txt
-        #       f- no rename to do as no chat files at all or presence of several chat files (in this case, it's up to you to determine manually what to keep/merge)
+        #   2- if "process_chat" in settings is enabled :
+        #       f- rename the only chat_idVideo_XXX.txt to chat_idVideo.txt
+        #       g- no rename to do as no chat files at all or presence of several chat files (in this case, it's up to you to determine manually what to keep/merge)
         
         #   3- if "download_files" in settings is enabled :
-        #       g- download files of video
+        #       h- download files of video
         
         process_videos_Thread = threading.Thread(target=self.process_videos)
         process_videos_Thread.start()
@@ -1009,7 +1103,8 @@ if __name__ == "__main__":
         },
         'download_files' : {
             'enabled' : True,
-            'yt-dlp_options': ['-S', 'res:480', '--remote-components', 'ejs:github', '--js-runtimes', 'deno:',  # Put path of deno folder
+            'yt-dlp_options': ['-S', 'res:480',
+            '--remote-components', 'ejs:github', '--js-runtimes', 'deno:',  # Put path of deno folder
             '--retries', '40', '--fragment-retries', '40', '--socket-timeout', '300',
             '-v', '-k', '-o', os.path.dirname(os.path.realpath(__file__)) + '/files/' + '%(id)s %(title)s.%(ext)s',
             '--no-part', '--merge-output-format', 'mp4',

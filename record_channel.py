@@ -3,7 +3,8 @@
 from chat_downloader import ChatDownloader
 import scrapetube
 import requests, json, sys, os, time, psutil, io, re, math
-from http.cookiejar import (MozillaCookieJar, Cookie)
+from urllib3.util.retry import Retry
+from http.cookiejar import MozillaCookieJar
 from datetime import datetime, timedelta
 import dateutil.parser
 import threading
@@ -55,6 +56,11 @@ class Program():
         self.initStreamlinkTimeout()
         self.initLoggingFile()
         self.initDebug()
+        self.sessionYoutube = None
+        self.sessionGoogleApis = None        
+        self.initCookies()
+        self.initSessionYoutube()
+        self.initSessionGoogleApis()
 
         self.recordThreadList = []
         self.chatThreadList = []
@@ -145,13 +151,70 @@ class Program():
         self.loggingfile.write(dateNow["dateString"] + " : " + message + "\n")
         # Write in real time
         self.loggingfile.flush()
+
+    def initCookies(self):
+        self.set_user_cookies()
+        self.setCookies()
+
+    def set_user_cookies(self):
+        self.user_cookies = False
+        if self.settings['cookies']:
+            if os.path.isfile(self.settings['cookies']):
+                self.user_cookies = True
+                   
+    def setCookies(self):
+        if self.user_cookies is False:
+            # To avoid consent popup showing off when calling response = requests.get(url), we set a cookie to "Accept all"
+            cookie_jar = requests.cookies.RequestsCookieJar()
+            cookie_jar.set('SOCS', 'CAI', domain='.youtube.com', secure=True) # CAI means "accept all"          
+        else:
+            cookie_jar = MozillaCookieJar(self.settings['cookies'])
+            cookie_jar.load(ignore_discard=True)
             
+        self.cookie_jar = cookie_jar
+
+    def initSessionYoutube(self):
+        self.sessionYoutube = self.create_session(cookies=self.cookie_jar)
+
+    def initSessionGoogleApis(self):
+        # Youtube Data API V3 can sometimes return HTTP status 400 and 403 whereas request is valid, and sending this same request succeeds.        
+        self.sessionGoogleApis = self.create_session(status_forcelist=(400, 403, 408, 425, 429, 500, 502, 503, 504))
+
+    def create_session(
+        self,
+        cookies=None,
+        retries=3,
+        backoff_factor=1,
+        backoff_jitter=0.5,
+        allowed_methods=frozenset(["GET", "POST", "HEAD", "OPTIONS"]),
+        status_forcelist=(408, 425, 429, 500, 502, 503, 504),
+    ):
+
+        session = requests.Session()
+        
+        if cookies is not None:
+            session.cookies = cookies        
+
+        retry = Retry(
+            total=retries,
+            backoff_factor=backoff_factor,
+            backoff_jitter=backoff_jitter,
+            allowed_methods=allowed_methods,
+            status_forcelist=status_forcelist,
+            raise_on_status=False
+        )
+
+        adapter = requests.adapters.HTTPAdapter(max_retries=retry)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
+
     def initChannel(self):
         # Get handle from idchannel
         channelInfosURL = "https://www.googleapis.com/youtube/v3/channels?key=" + self.settings['YoutubeAPIV3']['youtubeKey'] + "&id=" + self.idchannel + "&part=snippet"
         print(channelInfosURL)
         try:
-            response = requests.get(channelInfosURL)
+            response = self.sessionGoogleApis.get(channelInfosURL, timeout=(3.05, 20))
             channelInfosResponse = response.text
             if response.status_code == 200:
                 channel_json = json.loads(channelInfosResponse)
@@ -218,8 +281,8 @@ class Program():
                     # Has been recorded at least once
                     lastChat = result[0]
                     print(lastChat)
-                    print(f"id_live={live['id_live']} idVideo={live['idVideo']} Last id_chat=" + str(lastChat['id_chat']) + " with status_chat=" + str(lastChat['status_chat']))
-                    self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Last id_chat=" + str(lastChat['id_chat']) + " with status_chat=" + str(lastChat['status_chat']), 'debug')
+                    print(f"id_live={live['id_live']} idVideo={live['idVideo']} Last id_chat={lastChat['id_chat']} with status_chat={lastChat['status_chat']}")
+                    self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Last id_chat={lastChat['id_chat']} with status_chat={lastChat['status_chat']}", 'debug')
 
                 cursor.close()
             except mysql.connector.Error as ex:
@@ -227,13 +290,16 @@ class Program():
                 self.writelog(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error Get last chat of live from chats table : {ex}", 'normal')
                 self.exitProgram()
             
-            # Check if chat_pid stored in DB is still running and its commandline matchs char_downloader executable and url of stream (in case of same pid is reused by OS for another thing)
+            # Check if chat_pid stored in DB is still running and its commandline matchs char_downloader executable, and url of stream and output filename (in case of same pid is reused by OS for another program or another chat recording)
             procChatExists = False
             if lastChat is not None:
                 if lastChat['chat_pid'] is not None and psutil.pid_exists(lastChat['chat_pid']) is True:
                     try:
                         proc = psutil.Process(lastChat['chat_pid'])
-                        if proc.cmdline()[1] == self.settings['record_chat']['path_chat_downloader'] + 'chat_downloader' and url in proc.cmdline():
+                        if (proc.cmdline()[1] == self.settings['record_chat']['path_chat_downloader'] + 'chat_downloader'
+                        and url in proc.cmdline()
+                        and any(arg.startswith(f"{self.settings['folder_recording']}chat_{self.idchannel}.{lastChat['idVideo']}.{lastChat['filenumber']}.txt") for arg in proc.cmdline())
+                        ):
                             procChatExists = True                            
                     except Exception as e:
                         print(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Impossible to get Python process informations for chat recording : {e}")
@@ -246,11 +312,10 @@ class Program():
                 
                 if lastChat is None:
                     # No previous chat
-                    newfilenumber = '001'
+                    newfilenumber = 1
                 else:
                     # Set filenumber + 1
-                    newfilenumber = int(lastChat['filenumber']) + 1
-                    newfilenumber = str(newfilenumber).rjust(3, '0')
+                    newfilenumber = lastChat['filenumber'] + 1
                 
                 # Insert new chat in chats table
                 dateNow = self.getDateNow()
@@ -283,8 +348,8 @@ class Program():
                 self.chatThreadList.append(chatThread)
                 chatThread.start()
             else:
-                print(f"id_live={live['id_live']} idVideo={live['idVideo']} We don't record chat as there's one currently ongoing, record=" + str(lastChat))
-                self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} We don't record chat as there's one currently ongoing, record=" + str(lastChat), 'debug')
+                print(f"id_live={live['id_live']} idVideo={live['idVideo']} We don't record chat as there's one currently ongoing, record={lastChat}")
+                self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} We don't record chat as there's one currently ongoing, record={lastChat}", 'debug')
 
             # Close Mysql connection
             try:
@@ -323,8 +388,8 @@ class Program():
                     # Has been recorded at least once
                     lastRecord = result[0]
                     print(lastRecord)
-                    print(f"id_live={live['id_live']} idVideo={live['idVideo']} Last id_record=" + str(lastRecord['id_record']) + " with status_recording=" + str(lastRecord['status_recording']))
-                    self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Last id_record=" + str(lastRecord['id_record']) + " with status_recording=" + str(lastRecord['status_recording']), 'debug')
+                    print(f"id_live={live['id_live']} idVideo={live['idVideo']} Last id_record={lastRecord['id_record']} with status_recording={lastRecord['status_recording']}")
+                    self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Last id_record={lastRecord['id_record']} with status_recording={lastRecord['status_recording']}", 'debug')
                     
                 cursor.close()
             except mysql.connector.Error as ex:
@@ -332,30 +397,47 @@ class Program():
                 self.writelog(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error Get last record of live from records table : {ex}", 'normal')
                 self.exitProgram()
                                   
-            # Check if recording_pid stored in DB is still running and its commandline matchs record_live_tool executable and url of stream (in case of same pid is reused by OS for another thing)
+            # Check if recording_pid stored in DB is still running and its commandline matchs record_live_tool executable, url of stream and output filename (in case of same pid is reused by OS for another program or another video recording)
+            # If yt-dlp is doing some ffmpeg stuff (fixing mpeg-ts or merging audio and video), it can takes time and delays future recording of same stream
+            # So, if recording_pid is still running, we also check for "ffmpeg -y -loglevel repeat+info -i" and if present, we allow a new recording
             proc_record_live_tool_exists = False
+            proc_record_live_tool_ffmpeg = False
             if lastRecord is not None:
                 if lastRecord['recording_pid'] is not None and psutil.pid_exists(lastRecord['recording_pid']) is True:
                     try:
                         proc = psutil.Process(lastRecord['recording_pid'])
-                        if proc.cmdline()[1] == self.settings['record_video']['path_' + self.settings['record_video']['record_live_tool']] + self.settings['record_video']['record_live_tool'] and url in proc.cmdline():
-                            proc_record_live_tool_exists = True
+                        if (proc.cmdline()[1] == self.settings['record_video']['path_' + self.settings['record_video']['record_live_tool']] + self.settings['record_video']['record_live_tool']
+                        and url in proc.cmdline()
+                        and any(arg.startswith(f"{self.settings['folder_recording']}video_{self.idchannel}.{lastRecord['idVideo']}.{lastRecord['filenumber']}.") for arg in proc.cmdline())
+                        ):
+                            proc_record_live_tool_exists = True                            
+                            if self.settings['record_video']['record_live_tool'] == "yt-dlp":                           
+                                # Check in yt-dp log if "ffmpeg -y -loglevel repeat+info -i" string is present                               
+                                lastRecord_yt_dlp_logfile = f"{self.settings['folder_recording']}{self.settings['record_video']['record_live_tool']}_{self.idchannel}.{live['idVideo']}.{lastRecord['filenumber']}.txt"
+                                if os.path.isfile(lastRecord_yt_dlp_logfile):
+                                    with open(lastRecord_yt_dlp_logfile, "r", encoding="utf-8") as record_log:
+                                        for line in record_log:
+                                            if "ffmpeg -y -loglevel repeat+info -i" in line:
+                                                proc_record_live_tool_ffmpeg = True
+                                                print(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for filenumber={lastRecord['filenumber']}, we don't wait for this process={lastRecord['recording_pid']} to terminate\nLine={line}")
+                                                self.writelog(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started as started merging for filen for filenumber={lastRecord['filenumber']}, we don't wait for this process={lastRecord['recording_pid']} to terminate\nLine={line}", 'normal')
+                                                break
+                                
                     except Exception as e:
                         print(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Impossible to get {self.settings['record_video']['record_live_tool']} process informations for video recording : {e}")
                         self.writelog(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Impossible to get {self.settings['record_video']['record_live_tool']} process informations for video recording : {e}", 'normal')
                         # We continue normally
             
-            if proc_record_live_tool_exists is False:
+            if proc_record_live_tool_exists is False or proc_record_live_tool_ffmpeg is True:
                 print(f"id_live={live['id_live']} idVideo={live['idVideo']} We record a new video file")
                 self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} We record a new video file", 'debug')
 
                 if lastRecord is None:
                     # No previous record
-                    newfilenumber = '001'
+                    newfilenumber = 1
                 else:
                     # Set filenumber + 1
-                    newfilenumber = int(lastRecord['filenumber']) + 1
-                    newfilenumber = str(newfilenumber).rjust(3, '0')
+                    newfilenumber = lastRecord['filenumber'] + 1
                 
                 # Insert new record in records table
                 dateNow = self.getDateNow()
@@ -389,8 +471,8 @@ class Program():
                 self.recordThreadList.append(recordThread)
                 recordThread.start()
             else:
-                print(f"id_live={live['id_live']} idVideo={live['idVideo']} We don't record video as there's one currently ongoing, record=" + str(lastRecord))
-                self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} We don't record video as there's one currently ongoing, record=" + str(lastRecord), 'debug')
+                print(f"id_live={live['id_live']} idVideo={live['idVideo']} We don't record video as there's one currently ongoing, record={lastRecord}")
+                self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} We don't record video as there's one currently ongoing, record={lastRecord}", 'debug')
 
             # Close Mysql connection
             try:
@@ -416,19 +498,19 @@ class Program():
 
     def recordLive(self, live, newRecord):
         url = "https://www.youtube.com/watch?v=" + live['idVideo']
-        basefile = self.settings['folder_recording'] + 'video_' + self.idchannel + '.' + live['idVideo']
-        basefile_new_record = basefile + '.' + newRecord['filenumber']      
-        tsfile = basefile_new_record + '.ts'
-        mp4file = basefile_new_record + '.mp4'
+        basefile = f"{self.settings['folder_recording']}video_{self.idchannel}.{live['idVideo']}"
+        basefile_new_record = f"{basefile}.{newRecord['filenumber']}"
+        streamlink_file = f"{basefile_new_record}.ts"
+        yt_dlp_file = f"{basefile_new_record}.%(ext)s"
         outputfile = ''
-        record_logfile = self.settings['folder_recording'] + self.settings['record_video']['record_live_tool']  + '_' + self.idchannel + '.' + live['idVideo'] + '.' + newRecord['filenumber'] + '.txt'
+        record_logfile = f"{self.settings['folder_recording']}{self.settings['record_video']['record_live_tool']}_{self.idchannel}.{live['idVideo']}.{newRecord['filenumber']}.txt"
         
         print(f"id_live={live['id_live']} idVideo={live['idVideo']} Starting recording live with with {self.settings['record_video']['record_live_tool']} basefile={basefile_new_record}")
         self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Starting recording live with {self.settings['record_video']['record_live_tool']} basefile={basefile_new_record}", 'normal')
         
         if self.settings['record_video']['record_live_tool'] == "streamlink":
             # Streamlink produces .ts file for each attempt then we convert them in .mp4
-            outputfile = tsfile
+            outputfile = streamlink_file
             cmd_record = [self.settings['record_video']['path_streamlink'] + 'streamlink', "-o", outputfile]
             if len(settings['record_video']['streamlink_options']) > 0:
                 cmd_record.extend(self.settings['record_video']['streamlink_options'])
@@ -436,7 +518,7 @@ class Program():
             cmd_record.extend([url, self.settings['record_video']['streamlink_stream']])
         elif self.settings['record_video']['record_live_tool'] == "yt-dlp":
             # yt-dlp with --merge-output-format mp4 produces .mp4 files. So no need to convert them to .mp4
-            outputfile = mp4file
+            outputfile = yt_dlp_file
             cmd_record = [self.settings['record_video']['path_yt-dlp'] + 'yt-dlp', "-o", outputfile,
             '--ffmpeg-location', self.settings['record_video']['path_ffmpeg'] + 'ffmpeg', *self.settings['record_video']['yt-dlp_options']]
             
@@ -444,8 +526,8 @@ class Program():
                 cmd_record.extend(['--cookies', self.settings['cookies']])
                 
             # We use '--live-from-start' only if no file has been recorded yet
-            mp4files = glob.glob(basefile + '.*')
-            if len(mp4files) == 0:
+            recordfiles = glob.glob(f"{basefile}.*")
+            if len(recordfiles) == 0:
                 cmd_record.append('--live-from-start')
             
             cmd_record.append(url)
@@ -476,7 +558,7 @@ class Program():
         newRecord['recording_pid'] = recordProcess.pid
         newRecord['status_recording'] = 'recording'
         try:
-            print("Update status status_recording = 'recording' and pid process with newRecord :" + str(newRecord))
+            print(f"Update status status_recording = 'recording' and pid process with newRecord={newRecord}")
             connection = db.getConnection()
             cursor = connection.cursor(prepared=True, dictionary=True)
             update_record_query = """UPDATE records SET recording_pid = %(recording_pid)s, status_recording = %(status_recording)s WHERE id_record = %(id_record)s"""
@@ -619,7 +701,8 @@ class Program():
                 if convertProcess.returncode == 0 and os.path.isfile(mp4file) is True:
                     print(f"id_live={live['id_live']} idVideo={live['idVideo']} Conversion in mp4 is OK : {mp4file}")
                     self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Conversion in mp4 is OK : {mp4file}", 'normal')
-                    os.remove(outputfile)
+                    #os.remove(outputfile)
+                    os.rename(outputfile, outputfile + ".old")
 
         # Close Mysql connection
         try:
@@ -632,8 +715,8 @@ class Program():
 
     def recordChat(self, live, newChat):       
         url = "https://www.youtube.com/watch?v=" + live['idVideo']
-        chatfile = self.settings['folder_recording'] + "chat_" + self.idchannel + '.' + live['idVideo'] + '.' + newChat['filenumber'] + '.txt'
-        chat_downloader_log_filename = self.settings['folder_recording'] + 'chat_downloader_' + self.idchannel + '.' + live['idVideo'] + '.' + newChat['filenumber'] + '.txt'
+        chatfile = f"{self.settings['folder_recording']}chat_{self.idchannel}.{live['idVideo']}.{newChat['filenumber']}.txt"
+        chat_downloader_log_filename = f"{self.settings['folder_recording']}chat_downloader_{self.idchannel}.{live['idVideo']}.{newChat['filenumber']}.txt"
         
         print(f"id_live={live['id_live']} idVideo={live['idVideo']} Starting recording chat chatfile={chatfile}")
         self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Starting recording chat chatfile={chatfile}", 'normal')        
@@ -671,7 +754,7 @@ class Program():
         newChat['chat_pid'] = recordProcess.pid
         newChat['status_chat'] = 'recording'
         try:
-            print("Update status status_chat = 'recording' with newChat :" + str(newChat))
+            print("Update status status_chat = 'recording' with newChat={newChat}")
             connection = db.getConnection()
             cursor = connection.cursor(prepared=True, dictionary=True)
             update_chat_query = """UPDATE chats SET status_chat = %(status_chat)s, chat_pid = %(chat_pid)s WHERE id_chat = %(id_chat)s"""
@@ -730,7 +813,7 @@ class Program():
         newChat['status_chat'] = 'finished'
         newChat["status_chat_downloader"] = recordProcess.returncode
         try:
-            print("Update status status_chat = 'finished' with newChat :" + str(newChat))
+            print("Update status status_chat = 'finished' with newChat ={newChat}")
             connection = db.getConnection()
             cursor = connection.cursor(prepared=True, dictionary=True)
             update_chat_query = """UPDATE chats SET status_chat = %(status_chat)s, status_chat_downloader = %(status_chat_downloader)s, dateEnd = %(dateEnd)s
@@ -771,19 +854,10 @@ class Program():
 
     def getVideoInfos(self, url):
         infosVideo = {"ytInitialPlayerResponse": None, "videoDetails": None}
+               
         try:
-            if self.settings['cookies']:
-                cookie_jar = MozillaCookieJar(self.settings['cookies'])
-                cookie_jar.load(ignore_discard=True)
-                session = requests.Session()
-                session.cookies = cookie_jar
-                response = session.get(url)
-            else:
-                # To avoid consent popup showing off when calling response = requests.get(url), we set a cookie to "Accept all" :
-                jar = requests.cookies.RequestsCookieJar()
-                jar.set('SOCS', 'CAI', domain='.youtube.com', secure=True) # CAI means "accept all"
-                response = requests.get(url, cookies=jar)
-            
+            response = self.sessionYoutube.get(url, timeout=(3.05, 20))
+
             if response.status_code == 200:
                 ytInitialPlayerResponse = re.findall('ytInitialPlayerResponse\\s*=\\s*({.+?})\\s*;', response.text)
                 if len(ytInitialPlayerResponse) == 1:
@@ -797,11 +871,11 @@ class Program():
                         "is_live": videoDetails.get("isLive"), "playabilityStatus": playabilityStatus}
                         infosVideo["videoDetails"] = video
                     else:
-                        print(f"{url} ytInitialPlayerResponse : videoDetails not found, status={playabilityStatus.get('status')} reason={playabilityStatus.get('reason')}")
-                        self.writelog(f"{url} ytInitialPlayerResponse : videoDetails not found, status={playabilityStatus.get('status')} reason={playabilityStatus.get('reason')}", 'debug')
+                        print(f"{url} : ytInitialPlayerResponse.videoDetails not found, status={playabilityStatus.get('status')} reason={playabilityStatus.get('reason')}")
+                        self.writelog(f"{url} : ytInitialPlayerResponse.videoDetails not found, status={playabilityStatus.get('status')} reason={playabilityStatus.get('reason')}", 'debug')
                 else:
-                    print(f"{url} ytInitialPlayerResponse not found")
-                    self.writelog(f"{url} ytInitialPlayerResponse not found", 'debug')
+                    print(f"{url} : ytInitialPlayerResponse not found")
+                    self.writelog(f"{url} : ytInitialPlayerResponse not found", 'debug')
             else:
                 print(f"[×] Response of url {url} isn't OK : {response.status_code} {response.text}")
                 self.writelog(f"[×] Response of url {url} isn't OK : {response.status_code} {response.text}", 'normal')
@@ -829,7 +903,7 @@ class Program():
         # in elif discovery_method == 'streams_url':, add :
         # videostypes = ["streams", "videos"]
         # for videotype in videostypes :
-        #   videos = scrapetube.get_channel(channel_id=self.idchannel, content_type=videotype, sort_by="newest")
+        #   videos = scrapetube.get_channel(channel_id=self.idchannel, content_type=videotype, cookies=self.settings['cookies'], sort_by="newest")
         #       for video in videos:
         #           if video['is_live'] is True
         
@@ -854,13 +928,14 @@ class Program():
             # - call to Youtube API V3 /videos : too much consuming to have same detection delay as scrapetube
             # - use push notifications via PubSubHubbub. Then check every video and see if it concerns a running live. 
             try:
-                streams_scrapetube = scrapetube.get_channel(channel_id=self.idchannel, content_type="streams", limit=30, sort_by="newest")
+                streams_scrapetube = scrapetube.get_channel(channel_id=self.idchannel, content_type="streams", limit=30, cookies=self.settings['cookies'], sort_by="newest")
+                list_streams_scrapetube = list(streams_scrapetube)
             except Exception as e:
                 print(f"[×] Error scrapetube /streams : {e}")
                 self.writelog(f"[×] Error scrapetube /streams : {e}", 'normal')
                 return
             
-            for stream in streams_scrapetube:
+            for stream in list_streams_scrapetube:
                 url = "https://www.youtube.com/watch?v=" + str(stream['videoId'])
                 print(url)
                 self.writelog(url, 'debug')
@@ -938,7 +1013,7 @@ class Program():
                 "&part=snippet,contentDetails,statistics,liveStreamingDetails"
                 print(videosInfosURL)
                 try:
-                    response = requests.get(videosInfosURL)
+                    response = self.sessionGoogleApis.get(videosInfosURL, timeout=(3.05, 20))
                     videosInfosResponse = response.text
                     if response.status_code == 200:
                         video_json = json.loads(videosInfosResponse)       
@@ -1040,12 +1115,16 @@ class Program():
         self.writelog("Search for livestreams done", 'debug')
 
     def loopSearchLives(self, discovery_method, timestamp_first_start_script):
+        dateNowStart = self.getDateNow()
+        min_of_now_start = dateNowStart["object"].minute
         index = 0
         while True:
             # Check if there's enough remaining time to launch searchLives()
             dateNow = self.getDateNow()
             second_of_now = dateNow["object"].second
-            if second_of_now <= 60 - self.settings['searchlives_wait_before_retry'] - math.floor(self.settings['searchlives_wait_before_retry']) / 2 - self.settings['searchlives_seconds_security']:                
+            min_of_now = dateNow["object"].minute
+            if (min_of_now == min_of_now_start
+            and second_of_now <= 60 - self.settings['searchlives_wait_before_retry'] - math.floor(self.settings['searchlives_wait_before_retry']) / 2 - self.settings['searchlives_seconds_security']):
                 if index > 0:
                     time.sleep(self.settings['searchlives_wait_before_retry'])
 
@@ -1063,7 +1142,7 @@ class Program():
         self.writelog("Starting program")
         # self.initDatabase()
         
-        self.writelog("Channel " + self.urlchannel + " id : " + self.idchannel)
+        self.writelog(f"Channel {self.urlchannel} id : {self.idchannel}")
         
         timestamp_first_start_script = time.perf_counter()
 
@@ -1126,7 +1205,9 @@ if __name__ == "__main__":
             'path_ffmpeg': os.path.dirname(os.path.realpath(__file__)) + '/', # Add / at the end, same directory for ffmpeg and ffprobe
             'streamlink_options': ['--stream-sorting-excludes', '>480p,>480p30', '--stream-segmented-queue-deadline', '0', '--stream-timeout', '120'], # 120s of timeout is good
             'streamlink_stream': 'best,best-unfiltered', # With these streamlink_options and streamlink_stream settings : you will get 480p or just below if 480p is not found
-            'yt-dlp_options': ['-S', 'res:480', '--remote-components', 'ejs:github', '--js-runtimes', 'deno:', # Put path of deno folder
+            'yt-dlp_options': ['-S', 'res:480',
+            '-f', 'best[vcodec!=none][acodec!=none]/bestvideo+bestaudio',
+            '--remote-components', 'ejs:github', '--js-runtimes', 'deno:/home/vmczfjvdzf/.deno/bin',
             '--retries', '40', '--fragment-retries', '40', '--socket-timeout', '300',
             '-v', '-k',
             '--no-part', '--merge-output-format', 'mp4',

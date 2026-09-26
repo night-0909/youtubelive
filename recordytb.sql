@@ -11,7 +11,7 @@ SET time_zone = "+00:00";
 CREATE TABLE `chats` (
   `id_chat` int(11) NOT NULL,
   `id_live` int(11) NOT NULL,
-  `filenumber` varchar(3) NOT NULL,
+  `filenumber` int(11) NOT NULL,
   `dateStart` datetime NOT NULL,
   `dateEnd` datetime DEFAULT NULL,
   `chat_pid` int(11) DEFAULT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE `lives` (
 CREATE TABLE `records` (
   `id_record` int(11) NOT NULL,
   `id_live` int(11) NOT NULL,
-  `filenumber` varchar(3) NOT NULL,
+  `filenumber` int(11) NOT NULL,
   `dateStart` datetime NOT NULL,
   `dateEnd` datetime DEFAULT NULL,
   `recording_pid` int(11) DEFAULT NULL,
