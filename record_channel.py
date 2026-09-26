@@ -701,6 +701,7 @@ class Program():
                 if convertProcess.returncode == 0 and os.path.isfile(mp4file) is True:
                     print(f"id_live={live['id_live']} idVideo={live['idVideo']} Conversion in mp4 is OK : {mp4file}")
                     self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Conversion in mp4 is OK : {mp4file}", 'normal')
+                    # Important : keep files in case something wrong is happening and original files are needed
                     #os.remove(outputfile)
                     os.rename(outputfile, outputfile + ".old")
 
