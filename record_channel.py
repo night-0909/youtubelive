@@ -1207,7 +1207,7 @@ if __name__ == "__main__":
             'streamlink_options': ['--stream-sorting-excludes', '>480p,>480p30', '--stream-segmented-queue-deadline', '0', '--stream-timeout', '120'], # 120s of timeout is good
             'streamlink_stream': 'best,best-unfiltered', # With these streamlink_options and streamlink_stream settings : you will get 480p or just below if 480p is not found
             'yt-dlp_options': ['-S', 'res:480',
-            '-f', 'best[vcodec!=none][acodec!=none]/bestvideo+bestaudio',
+            '-f', 'best/bestvideo+bestaudio',
             '--remote-components', 'ejs:github', '--js-runtimes', 'deno:/home/vmczfjvdzf/.deno/bin',
             '--retries', '40', '--fragment-retries', '40', '--socket-timeout', '300',
             '-v', '-k',

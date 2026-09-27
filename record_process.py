@@ -1104,6 +1104,7 @@ if __name__ == "__main__":
         'download_files' : {
             'enabled' : True,
             'yt-dlp_options': ['-S', 'res:480',
+            '-f', 'best/bestvideo+bestaudio',
             '--remote-components', 'ejs:github', '--js-runtimes', 'deno:',  # Put path of deno folder
             '--retries', '40', '--fragment-retries', '40', '--socket-timeout', '300',
             '-v', '-k', '-o', os.path.dirname(os.path.realpath(__file__)) + '/files/' + '%(id)s %(title)s.%(ext)s',
