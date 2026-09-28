@@ -419,8 +419,8 @@ class Program():
                                         for line in record_log:
                                             if "ffmpeg -y -loglevel repeat+info -i" in line:
                                                 proc_record_live_tool_ffmpeg = True
-                                                print(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for filenumber={lastRecord['filenumber']}, we don't wait for this process={lastRecord['recording_pid']} to terminate\nLine={line}")
-                                                self.writelog(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started as started merging for filen for filenumber={lastRecord['filenumber']}, we don't wait for this process={lastRecord['recording_pid']} to terminate\nLine={line}", 'normal')
+                                                print(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}")
+                                                self.writelog(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}", 'normal')
                                                 break
                                 
                     except Exception as e:
