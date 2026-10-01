@@ -518,13 +518,7 @@ class Program():
                 lastRecord = live['records'][len(live['records']) - 1]
                 print(f"id_live={live['id_live']} idVideo={idVideo} lastRecord : {lastRecord}")
                 self.writelog(f"id_live={live['id_live']} idVideo={idVideo} lastRecord : {lastRecord}", 'normal')
-               
-                # Debug info from last record
-                lastfilenumbervideo = lastRecord['filenumber']
-                lastmp4file = f"{self.settings['folder_recording']}video_{live['idchannel']}.{idVideo}.{lastfilenumbervideo}.mp4"
                 resultmp4file = f"{self.settings['folder_recording']}video_{live['idchannel']}.{idVideo}.mp4"
-                print(f"id_live={live['id_live']} idVideo={idVideo} lastmp4file : {lastmp4file}")
-                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} lastmp4file : {lastmp4file}", 'normal')
                 print(f"id_live={live['id_live']} idVideo={idVideo} resultmp4file : {resultmp4file}")
                 self.writelog(f"id_live={live['id_live']} idVideo={idVideo} resultmp4file : {resultmp4file}", 'normal')
 
@@ -936,13 +930,7 @@ class Program():
                 lastChat = live['chats'][len(live['chats']) - 1]
                 print(f"id_live={live['id_live']} idVideo={idVideo} lastChat : {lastChat}")
                 self.writelog(f"id_live={live['id_live']} idVideo={idVideo} lastChat : {lastChat}", 'normal')            
-                
-                # Debug info from last chat
-                lastfilenumberchat = lastChat['filenumber']
-                lastchatfile = f"{self.settings['folder_recording']}chat_{live['idchannel']}.{idVideo}.{lastfilenumberchat}.txt"
                 resultchatfile = f"{self.settings['folder_recording']}chat_{live['idchannel']}.{idVideo}.txt"
-                print(f"id_live={live['id_live']} idVideo={idVideo} lastchatfile : {lastchatfile}")
-                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} lastchatfile : {lastchatfile}", 'normal')
                 print(f"id_live={live['id_live']} idVideo={idVideo} resultchatfile : {resultchatfile}")
                 self.writelog(f"id_live={live['id_live']} idVideo={idVideo} resultchatfile : {resultchatfile}", 'normal')
 
@@ -1040,24 +1028,24 @@ class Program():
                         elif len(chatfiles) == 1:
                             print(f"id_live={live['id_live']} idVideo={idVideo} One chat file found : {chatfiles[0]}")
                             self.writelog(f"id_live={live['id_live']} idVideo={idVideo} One chat file found : {chatfiles[0]}", 'normal')
-                            if os.path.isfile(lastchatfile):
+                            if os.path.isfile(chatfiles[0]):
                                 timestamp_now = datetime.now().timestamp()
-                                time_diff_seconds = timestamp_now - os.path.getmtime(lastchatfile)
+                                time_diff_seconds = timestamp_now - os.path.getmtime(chatfiles[0])
                                 if time_diff_seconds > self.settings['process_chat']['seconds_before_action']:
                                     if not os.path.isfile(resultchatfile):
-                                        print(f"id_live={live['id_live']} idVideo={idVideo} We rename chat file : {lastchatfile}")
-                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} We rename chat file : {lastchatfile}", 'normal')
-                                        os.rename(lastchatfile, resultchatfile)
+                                        print(f"id_live={live['id_live']} idVideo={idVideo} We rename chat file : {chatfiles[0]}")
+                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} We rename chat file : {chatfiles[0]}", 'normal')
+                                        os.rename(chatfiles[0], resultchatfile)
                                         update_status_rename_chat = True
                                         params['status_rename_chat'] = 'finished'
                                     else:
-                                        print(f"id_live={live['id_live']} idVideo={idVideo} Chat filename already exists, we don't rename chat file : {lastchatfile}")
-                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Chat filename already exists, we don't rename chat file : {lastchatfile}", 'normal')
+                                        print(f"id_live={live['id_live']} idVideo={idVideo} Chat filename already exists, we don't rename chat file : {chatfiles[0]}")
+                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Chat filename already exists, we don't rename chat file : {chatfiles[0]}", 'normal')
                                         update_status_rename_chat = True
                                         params['status_rename_chat'] = 'not_needed'
                                 else:
-                                    print(f"id_live={live['id_live']} idVideo={idVideo} Chat file is not older than {self.settings['process_chat']['seconds_before_action']} seconds, we do not rename chat file : {lastchatfile}")
-                                    self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Chat file is not older than {self.settings['process_chat']['seconds_before_action']} seconds, we do not rename chat file : {lastchatfile}", 'normal')
+                                    print(f"id_live={live['id_live']} idVideo={idVideo} Chat file is not older than {self.settings['process_chat']['seconds_before_action']} seconds, we do not rename chat file : {chatfiles[0]}")
+                                    self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Chat file is not older than {self.settings['process_chat']['seconds_before_action']} seconds, we do not rename chat file : {chatfiles[0]}", 'normal')
                                     update_status_rename_chat = False
                         
                         # If more than one chat file, we don't rename and let the user check manually where all chat messages are
