@@ -670,8 +670,8 @@ class Program():
                                     formatFileMP4 = str(stdout.strip())
                                     
                                     if formatFileMP4 == "mpegts":
-                                        print(f"[×] idVideo={{idVideo}} {mp4file} is in MPEG-TS format, it needs to be converted in MPEG-4 format")
-                                        self.writelog(f"[×] idVideo={idVideo} {mp4file} is in MPEG-TS format, it needs to be converted in MPEG-4 format", 'normal')
+                                        print(f"[×] id_live={live['id_live']} idVideo={{idVideo}} {mp4file} is in MPEG-TS format, it needs to be converted in MPEG-4 format")
+                                        self.writelog(f"[×] id_live={live['id_live']} idVideo={idVideo} {mp4file} is in MPEG-TS format, it needs to be converted in MPEG-4 format", 'normal')
                                         
                                         timestamp_now = datetime.now().timestamp()
                                         time_diff_seconds = timestamp_now - os.path.getmtime(mp4file)
@@ -1071,8 +1071,8 @@ class Program():
                         if update_status_rename_chat is True:
                             self.update_live(db, live, params)
                     else:                       
-                        print(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_record_live_tool_running)} processes of chat_downloader are still running, we skip chat processing. Processes={proc_record_live_tool_running}")
-                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_record_live_tool_running)} processes of chat_downloader are still running, we skip chat processing. Processes={proc_record_live_tool_running}", 'normal')
+                        print(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_chat_running)} processes of chat_downloader are still running, we skip chat processing. Processes={proc_chat_running}")
+                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_chat_running)} processes of chat_downloader are still running, we skip chat processing. Processes={proc_chat_running}", 'normal')
                 else:
                     print(f"id_live={live['id_live']} idVideo={idVideo} Stream is still up on Youtube, we skip chat processing")
                     self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Stream is still up on Youtube, we skip chat processing", 'normal')
