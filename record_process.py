@@ -226,7 +226,7 @@ class Program():
         print(f"id_live={live['id_live']} idVideo={idVideo} Starting merge of mp4 files...")
         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Starting merge of mp4 files...", 'normal')
         
-        merge = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-f", "concat", "-safe", "0", "-i", file_list, "-c" , "copy", finalmp4file],
+        merge = subprocess.Popen([self.settings['tools']['path_ffmpeg'] + 'ffmpeg', "-f", "concat", "-safe", "0", "-i", file_list, "-c" , "copy", finalmp4file],
         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         
         try:
@@ -246,7 +246,7 @@ class Program():
         # To get only duration with no other info : ffprobe -v error -show_entries format=duration -sexagesimal -of default=noprint_wrappers=1:nokey=1 <file>
         # cf https://trac.ffmpeg.org/wiki/FFprobeTips#Formatcontainerduration
         durationMP4 = None
-        processGetInfoMP4 = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-sexagesimal', '-of',
+        processGetInfoMP4 = subprocess.Popen([self.settings['tools']['path_ffmpeg'] + 'ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-sexagesimal', '-of',
         'default=noprint_wrappers=1:nokey=1', finalmp4file],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         stdout, stderr = processGetInfoMP4.communicate()
@@ -342,8 +342,8 @@ class Program():
 
     def downloadVideosFiles(self, live):
         url = "https://www.youtube.com/watch?v=" + live['idVideo']       
-        cmd_download = [self.settings['video_tools']['path_yt-dlp'] + 'yt-dlp',
-        '--ffmpeg-location', self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', *self.settings['download_files']['yt-dlp_options']]
+        cmd_download = [self.settings['tools']['path_yt-dlp'] + 'yt-dlp',
+        '--ffmpeg-location', self.settings['tools']['path_ffmpeg'] + 'ffmpeg', *self.settings['download_files']['yt-dlp_options']]
         
         if self.settings['cookies']:
             cmd_download.extend(['--cookies', self.settings['cookies']])
@@ -590,7 +590,7 @@ class Program():
                         if liveRecord['recording_pid'] is not None and psutil.pid_exists(liveRecord['recording_pid']) is True:
                             try:
                                 proc = psutil.Process(liveRecord['recording_pid'])
-                                if (proc.cmdline()[1] == self.settings['video_tools']['path_' + liveRecord['recording_live_tool']] + liveRecord['recording_live_tool']
+                                if (proc.cmdline()[1] == self.settings['tools']['path_' + liveRecord['recording_live_tool']] + liveRecord['recording_live_tool']
                                 and url in proc.cmdline()
                                 and any(arg.startswith(f"{self.settings['folder_recording']}video_{live['idchannel']}.{idVideo}.{liveRecord['filenumber']}.") for arg in proc.cmdline())
                                 ):
@@ -628,7 +628,7 @@ class Program():
                                         print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_action']} seconds but still present : {tsfile}, we convert it to mp4")
                                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, .ts is older than {self.settings['process_video']['seconds_before_action']} seconds but still present : {tsfile}, we convert it to mp4", 'normal')
 
-                                        convert = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-i", tsfile, "-c", "copy", mp4file],
+                                        convert = subprocess.Popen([self.settings['tools']['path_ffmpeg'] + 'ffmpeg', "-i", tsfile, "-c", "copy", mp4file],
                                         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
                                         convert.wait()
                                         
@@ -663,7 +663,7 @@ class Program():
  
                                     # Check if file is in MPEG-TS format
                                     formatFileMP4 = None
-                                    processGetInfoMP4 = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffprobe', '-v', 'error', '-show_entries', 'format=format_name',  '-of',
+                                    processGetInfoMP4 = subprocess.Popen([self.settings['tools']['path_ffmpeg'] + 'ffprobe', '-v', 'error', '-show_entries', 'format=format_name',  '-of',
                                     'default=noprint_wrappers=1:nokey=1', mp4file],
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                                     stdout, stderr = processGetInfoMP4.communicate()
@@ -679,7 +679,7 @@ class Program():
                                             print(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, {mp4file} is older than {self.settings['process_video']['seconds_before_action']} seconds but in MPEG-TS format, we convert it to MPEG-4 format")
                                             self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Live is not running, {mp4file} is older than {self.settings['process_video']['seconds_before_action']} seconds but in MPEG-TS format, we convert it to MPEG-4 format", 'normal')
                                                                                        
-                                            convert = subprocess.Popen([self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg', "-i", mp4file, "-c", "copy", tempmp4file],
+                                            convert = subprocess.Popen([self.settings['tools']['path_ffmpeg'] + 'ffmpeg', "-i", mp4file, "-c", "copy", tempmp4file],
                                             stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
                                             convert.wait()
                                             
@@ -732,7 +732,7 @@ class Program():
                                                                 f_dest_filenames.append(f_filename)
                                                 
                                                 if len(f_dest_filenames) > 0:                                            
-                                                    merge_cmd = [self.settings['video_tools']['path_ffmpeg'] + 'ffmpeg']
+                                                    merge_cmd = [self.settings['tools']['path_ffmpeg'] + 'ffmpeg']
                                                     for f in f_dest_filenames:
                                                         merge_cmd.extend(["-i", f])
                                                     merge_cmd.extend(["-c", "copy", "-movflags", "+faststart", mp4file])
@@ -1007,7 +1007,7 @@ class Program():
                         if chat['chat_pid'] is not None and psutil.pid_exists(chat['chat_pid']) is True:
                             try:
                                 proc = psutil.Process(chat['chat_pid'])
-                                if (proc.cmdline()[1] == self.settings['record_chat']['path_chat_downloader'] + 'chat_downloader'
+                                if (proc.cmdline()[1] == self.settings['tools']['path_chat_downloader'] + 'chat_downloader'
                                 and url in proc.cmdline()
                                 and any(arg.startswith(f"{self.settings['folder_recording']}chat_{live['idchannel']}.{idVideo}.{chat['filenumber']}.txt") for arg in proc.cmdline())
                                 ):
@@ -1137,10 +1137,11 @@ if __name__ == "__main__":
         'dateFormats': {'dateString': '%d/%m/%Y %H:%M:%S', 'dateDBString': '%Y-%m-%d %H:%M:%S', 'dateFileString': '%d%m%Y%H%M%S'},
         # Converting and renaming
         'folder_recording': os.path.dirname(os.path.realpath(__file__)) + '/files/', # Add / at the end
-        'video_tools':
+        'tools':
             {'path_streamlink': '', # Add / at the end
             'path_yt-dlp' : '', # Add / at the end
-            'path_ffmpeg': os.path.dirname(os.path.realpath(__file__)) + '/' # Add / at the end, same directory for ffmpeg and ffprobe
+            'path_ffmpeg': os.path.dirname(os.path.realpath(__file__)) + '/', # Add / at the end, same directory for ffmpeg and ffprobe
+            'path_chat_downloader': '' # Add / at the end
         },
         'process_video': {
             'enabled' : True,
@@ -1148,8 +1149,7 @@ if __name__ == "__main__":
         },
         'process_chat': {
             'enabled' : True,
-            'seconds_before_action': 60*10, # 10 minutes
-            "path_chat_downloader": '' # Add / at the end
+            'seconds_before_action': 60*10 # 10 minutes
         },
         'download_files' : {
             'enabled' : True,
