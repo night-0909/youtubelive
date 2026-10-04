@@ -58,8 +58,8 @@ class Program():
         try:
             self.db = Database(self.settings['params_database'])
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
 
     def initDebug(self):
@@ -233,8 +233,8 @@ class Program():
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()        
         
         params = {'status_merging_all': 'ongoing'}
@@ -284,8 +284,8 @@ class Program():
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
 
         # UPDATE live with new status of merging and duration of merged .mp4 file
@@ -367,8 +367,8 @@ class Program():
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()        
         
         params = {'status_downloading_all': 'ongoing'}
@@ -383,8 +383,8 @@ class Program():
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
             
         status_downloading_all = 'finished' if downloadProcess.returncode == 0 else 'error'
@@ -407,8 +407,8 @@ class Program():
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
         
         if self.settings['download_files']['enabled'] is True:
@@ -440,8 +440,8 @@ class Program():
                         streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, cookies=self.settings['cookies'], sort_by="newest")
                         list_streams = list(streams)
                     except Exception as e:
-                        print(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
-                        self.writelog(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
+                        print(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
+                        self.writelog(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
                         continue
                     
                     for stream in list_streams:
@@ -474,8 +474,8 @@ class Program():
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
         
         try:
@@ -532,8 +532,8 @@ class Program():
                         streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, cookies=self.settings['cookies'], sort_by="newest")
                         list_streams = list(streams)
                     except Exception as e:
-                        print(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
-                        self.writelog(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
+                        print(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
+                        self.writelog(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
                         continue
                     
                     for stream in list_streams:
@@ -588,10 +588,18 @@ class Program():
                                 and url in proc.cmdline()
                                 and any(arg.startswith(f"{self.settings['folder_recording']}video_{live['idchannel']}.{idVideo}.{liveRecord['filenumber']}.") for arg in proc.cmdline())
                                 ):
-                                    proc_record_live_tool_running.append(liveRecord)
+                                    proc_record_live_tool_running.append({
+                                        "record": liveRecord,
+                                        "process": {
+                                            "pid": proc.pid,
+                                            "name": proc.name(),
+                                            "status": proc.status(),
+                                            "create_time": datetime.fromtimestamp(proc.create_time(), self.tzinfo).strftime(self.settings['dateFormats']['dateString'])
+                                        }
+                                    })
                             except Exception as e:
-                                print(f"[×] id_live={live['id_live']} idVideo={idVideo} Impossible to get {liveRecord['recording_live_tool']} process (PID={liveRecord['recording_pid']}) informations for video recording : {e}")
-                                self.writelog(f"[×] id_live={live['id_live']} idVideo={idVideo} Impossible to get {liveRecord['recording_live_tool']} process (PID={liveRecord['recording_pid']}) informations for video recording : {e}", 'normal')
+                                print(f"[x] id_live={live['id_live']} idVideo={idVideo} Impossible to get {liveRecord['recording_live_tool']} process (PID={liveRecord['recording_pid']}) informations for video recording : {e}")
+                                self.writelog(f"[x] id_live={live['id_live']} idVideo={idVideo} Impossible to get {liveRecord['recording_live_tool']} process (PID={liveRecord['recording_pid']}) informations for video recording : {e}", 'normal')
                                 # We continue normally
                                             
                     # Before trying to merge mp4 files together, we make sure for streamlink records that all .ts are converted to .mp4 (case of crash of record_channel.py or error in conversion process in record_channel.py)
@@ -664,8 +672,8 @@ class Program():
                                     formatFileMP4 = str(stdout.strip())
                                     
                                     if formatFileMP4 == "mpegts":
-                                        print(f"[×] id_live={live['id_live']} idVideo={{idVideo}} {mp4file} is in MPEG-TS format, it needs to be converted in MPEG-4 format")
-                                        self.writelog(f"[×] id_live={live['id_live']} idVideo={idVideo} {mp4file} is in MPEG-TS format, it needs to be converted in MPEG-4 format", 'normal')
+                                        print(f"[x] id_live={live['id_live']} idVideo={{idVideo}} {mp4file} is in MPEG-TS format, it needs to be converted in MPEG-4 format")
+                                        self.writelog(f"[x] id_live={live['id_live']} idVideo={idVideo} {mp4file} is in MPEG-TS format, it needs to be converted in MPEG-4 format", 'normal')
                                         
                                         timestamp_now = datetime.now().timestamp()
                                         time_diff_seconds = timestamp_now - os.path.getmtime(mp4file)
@@ -859,8 +867,8 @@ class Program():
                         mergeThreadList.append(mergeThread)
                         mergeThread.start()                       
                     else:
-                        print(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_record_live_tool_running)} processes of {lastRecord['recording_live_tool']} are still running, we skip video processing. Processes={proc_record_live_tool_running}")
-                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_record_live_tool_running)} processes of {lastRecord['recording_live_tool']} are still running, we skip video processing. Processes={proc_record_live_tool_running}", 'normal')
+                        print(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_record_live_tool_running)} processes of {lastRecord['recording_live_tool']} are still running, we skip video processing. Informations={proc_record_live_tool_running}")
+                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_record_live_tool_running)} processes of {lastRecord['recording_live_tool']} are still running, we skip video processing. Informations={proc_record_live_tool_running}", 'normal')
                 else:
                     print(f"id_live={live['id_live']} idVideo={idVideo} Stream is still up on Youtube, we skip video processing")
                     self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Stream is still up on Youtube, we skip video processing", 'normal')
@@ -887,8 +895,8 @@ class Program():
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
             
         try:
@@ -944,8 +952,8 @@ class Program():
                         streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, cookies=self.settings['cookies'], sort_by="newest")
                         list_streams = list(streams)
                     except Exception as e:
-                        print(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
-                        self.writelog(f"[×] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
+                        print(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
+                        self.writelog(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
                         continue
                         
                     for stream in list_streams:
@@ -999,10 +1007,18 @@ class Program():
                                 and url in proc.cmdline()
                                 and any(arg.startswith(f"{self.settings['folder_recording']}chat_{live['idchannel']}.{idVideo}.{chat['filenumber']}.txt") for arg in proc.cmdline())
                                 ):
-                                    proc_chat_running.append(chat)
+                                    proc_chat_running.append({
+                                        "chat": chat,
+                                        "process": {
+                                            "pid": proc.pid,
+                                            "name": proc.name(),
+                                            "status": proc.status(),
+                                            "create_time": datetime.fromtimestamp(proc.create_time(), self.tzinfo).strftime(self.settings['dateFormats']['dateString'])
+                                        }
+                                    })
                             except Exception as e:
-                                print(f"[×] id_live={live['id_live']} idVideo={idVideo} Impossible to get chat_downloader process (PID={chat['chat_pid']}) informations for chat recording : {e}")
-                                self.writelog(f"[×] id_live={live['id_live']} idVideo={idVideo} Impossible to get chat_downloader process (PID={chat['chat_pid']}) informations for chat recording : {e}", 'normal')
+                                print(f"[x] id_live={live['id_live']} idVideo={idVideo} Impossible to get chat_downloader process (PID={chat['chat_pid']}) informations for chat recording : {e}")
+                                self.writelog(f"[x] id_live={live['id_live']} idVideo={idVideo} Impossible to get chat_downloader process (PID={chat['chat_pid']}) informations for chat recording : {e}", 'normal')
                                 # We continue normally            
 
                     if len(proc_chat_running) == 0:
@@ -1059,8 +1075,8 @@ class Program():
                         if update_status_rename_chat is True:
                             self.update_live(db, live, params)
                     else:                       
-                        print(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_chat_running)} processes of chat_downloader are still running, we skip chat processing. Processes={proc_chat_running}")
-                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_chat_running)} processes of chat_downloader are still running, we skip chat processing. Processes={proc_chat_running}", 'normal')
+                        print(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_chat_running)} processes of chat_downloader are still running, we skip chat processing. Informations={proc_chat_running}")
+                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {len(proc_chat_running)} processes of chat_downloader are still running, we skip chat processing. Informations={proc_chat_running}", 'normal')
                 else:
                     print(f"id_live={live['id_live']} idVideo={idVideo} Stream is still up on Youtube, we skip chat processing")
                     self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Stream is still up on Youtube, we skip chat processing", 'normal')
