@@ -357,6 +357,9 @@ class Program():
 
             # Record yt-dlp stderr and stdout to file
             logfile = f"{self.settings['folder_recording']}downloading_files_{live['idVideo']}.log"
+            if os.path.isfile(logfile):
+                os.remove(logfile)
+            
             dl_yt_dlp_logfile_thread = threading.Thread(target=self.process_logfile, args=(downloadProcess, logfile))
             dl_yt_dlp_logfile_thread.start()
         except Exception as e:
@@ -379,6 +382,25 @@ class Program():
         print(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={downloadProcess.returncode} : {logfile}")
         self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={downloadProcess.returncode} : {logfile}", 'normal')
         
+        # Check if livestream was in Post-live mode. If true, we try downloading later
+        is_post_live = False
+        if os.path.isfile(logfile):
+            with open(logfile, "r", encoding="utf-8") as downloading_log:
+                for line in downloading_log:
+                    if "Video is in Post-Live Manifestless mode" in line:
+                        is_post_live = True
+                        print(f"id_live={live['id_live']} idVideo={live['idVideo']} livestream is in post live mode, we try downloading later\nLine={line}")
+                        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} livestream is in post live mode, we try downloading later\nLine={line}", 'normal')
+                        break
+        
+        if is_post_live is True:
+            status_downloading_all = None
+        else:        
+            if downloadProcess.returncode == 0:
+                status_downloading_all = 'finished'
+            else:
+                status_downloading_all = 'error'
+               
         try:
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
@@ -386,8 +408,7 @@ class Program():
             print(f"[x] Error connecting to database : {e}")
             self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
-            
-        status_downloading_all = 'finished' if downloadProcess.returncode == 0 else 'error'
+        
         params = {'status_downloading_all': status_downloading_all}
         self.update_live(db, live, params)
         
@@ -1162,6 +1183,7 @@ if __name__ == "__main__":
             '--remote-components', 'ejs:github', '--js-runtimes', 'deno:',  # Put path of deno folder
             '--retries', '40', '--fragment-retries', '40', '--socket-timeout', '300',
             '-v', '-k', '-o', os.path.dirname(os.path.realpath(__file__)) + '/files/' + '%(id)s %(title)s.%(ext)s',
+            '--match-filter', 'live_status=was_live', # To avoid downloading livestream still in post_live status ("Video is in Post-Live Manifestless mode")            
             '--no-part', '--merge-output-format', 'mp4',
             '--extractor-args', 'youtube:player-client=default,web_embedded,mweb' #See https://github.com/yt-dlp/yt-dlp/issues/16862#issuecomment-4642619967
             ]

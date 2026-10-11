@@ -73,8 +73,8 @@ class Program():
         try:
             self.db = Database(self.settings['params_database'])
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
 
     def initDebug(self):
@@ -220,8 +220,8 @@ class Program():
                 channel_json = json.loads(channelInfosResponse)
                 
                 if channel_json.get('pageInfo').get('totalResults') == 0:
-                    print(f"[×] channel={self.idchannel} Error channelInfosURL {channelInfosURL} : channel not found")
-                    self.writelog(f"[×] channel={self.idchannel} Error channelInfosURL {channelInfosURL} : channel not found")
+                    print(f"[x] channel={self.idchannel} Error channelInfosURL {channelInfosURL} : channel not found")
+                    self.writelog(f"[x] channel={self.idchannel} Error channelInfosURL {channelInfosURL} : channel not found")
                     self.exitProgram()
                 
                 item = channel_json.get('items')[0]
@@ -229,12 +229,12 @@ class Program():
                 self.handlechannel = snippet.get('customUrl')[1:len(snippet.get('customUrl'))]
                 self.urlchannel = "https://www.youtube.com/@" + self.handlechannel
             else:
-                print(f"[×] channel={self.idchannel} Response of channelInfosURL {channelInfosURL} isn't OK : {response.status_code} {response.text}")
-                self.writelog(f"[×] channel={self.idchannel} Response of channelInfosURL {channelInfosURL} isn't OK : {response.status_code} {response.text}")
+                print(f"[x] channel={self.idchannel} Response of channelInfosURL {channelInfosURL} isn't OK : {response.status_code} {response.text}")
+                self.writelog(f"[x] channel={self.idchannel} Response of channelInfosURL {channelInfosURL} isn't OK : {response.status_code} {response.text}")
                 self.exitProgram()
         except Exception as e:
-            print(f"[×] channel={self.idchannel} Error channelInfosURL {channelInfosURL} : {e}")
-            self.writelog(f"[×] channel={self.idchannel} Error channelInfosURL {channelInfosURL} : {e}")
+            print(f"[x] channel={self.idchannel} Error channelInfosURL {channelInfosURL} : {e}")
+            self.writelog(f"[x] channel={self.idchannel} Error channelInfosURL {channelInfosURL} : {e}")
             self.exitProgram()
 
     # Used when errors/exceptions occured and when we want to exit right now
@@ -263,15 +263,15 @@ class Program():
                 db = Database(self.settings['params_database'])
                 connection = db.getConnection()
             except Exception as e:
-                print(f"[×] Error connecting to database : {e}")
-                self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+                print(f"[x] Error connecting to database : {e}")
+                self.writelog(f"[x] Error connecting to database : {e}", 'normal')
                 self.exitProgram()
             
             # Get last chat of live from chats table
             try:
                 connection = db.getConnection()
                 cursor = connection.cursor(prepared=True, dictionary=True)
-                select_lastchat_query = """SELECT * FROM chats, lives
+                select_lastchat_query = """SELECT chats.* FROM chats, lives
                 WHERE lives.id_live = chats.id_live AND lives.idVideo=%(idVideo)s
                 ORDER BY id_chat DESC LIMIT 1"""
                 params = {"idVideo": live['idVideo']}
@@ -286,8 +286,8 @@ class Program():
 
                 cursor.close()
             except mysql.connector.Error as ex:
-                print(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error Get last chat of live from chats table : {ex}")
-                self.writelog(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error Get last chat of live from chats table : {ex}", 'normal')
+                print(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error Get last chat of live from chats table : {ex}")
+                self.writelog(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error Get last chat of live from chats table : {ex}", 'normal')
                 self.exitProgram()
             
             # Check if chat_pid stored in DB is still running and its commandline matchs char_downloader executable, and url of stream and output filename (in case of same pid is reused by OS for another program or another chat recording)
@@ -298,12 +298,12 @@ class Program():
                         proc = psutil.Process(lastChat['chat_pid'])
                         if (proc.cmdline()[1] == self.settings['record_chat']['path_chat_downloader'] + 'chat_downloader'
                         and url in proc.cmdline()
-                        and any(arg.startswith(f"{self.settings['folder_recording']}chat_{self.idchannel}.{lastChat['idVideo']}.{lastChat['filenumber']}.txt") for arg in proc.cmdline())
+                        and any(arg.startswith(f"{self.settings['folder_recording']}chat_{self.idchannel}.{live['idVideo']}.{lastChat['filenumber']}.txt") for arg in proc.cmdline())
                         ):
                             procChatExists = True                            
                     except Exception as e:
-                        print(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Impossible to get Python process informations for chat recording : {e}")
-                        self.writelog(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Impossible to get Python process informations for chat recording : {e}", 'normal')
+                        print(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} Impossible to get Python process informations for chat recording : {e}")
+                        self.writelog(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} Impossible to get Python process informations for chat recording : {e}", 'normal')
                         # We continue normally            
 
             if procChatExists is False:
@@ -370,15 +370,15 @@ class Program():
                 db = Database(self.settings['params_database'])
                 connection = db.getConnection()
             except Exception as e:
-                print(f"[×] Error connecting to database : {e}")
-                self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+                print(f"[x] Error connecting to database : {e}")
+                self.writelog(f"[x] Error connecting to database : {e}", 'normal')
                 self.exitProgram()
             
             # Get last record of live from records table
             try:
                 connection = db.getConnection()
                 cursor = connection.cursor(prepared=True, dictionary=True)
-                select_lastrecord_query = """SELECT * FROM records, lives
+                select_lastrecord_query = """SELECT records.* FROM records, lives
                 WHERE lives.id_live = records.id_live AND lives.idVideo=%(idVideo)s
                 ORDER BY id_record DESC LIMIT 1"""
                 params = {"idVideo": live['idVideo']}
@@ -393,8 +393,8 @@ class Program():
                     
                 cursor.close()
             except mysql.connector.Error as ex:
-                print(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error Get last record of live from records table : {ex}")
-                self.writelog(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error Get last record of live from records table : {ex}", 'normal')
+                print(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error Get last record of live from records table : {ex}")
+                self.writelog(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} Mysql Error Get last record of live from records table : {ex}", 'normal')
                 self.exitProgram()
                                   
             # Check if recording_pid stored in DB is still running and its commandline matchs record_live_tool executable, url of stream and output filename (in case of same pid is reused by OS for another program or another video recording)
@@ -408,7 +408,7 @@ class Program():
                         proc = psutil.Process(lastRecord['recording_pid'])
                         if (proc.cmdline()[1] == self.settings['record_video']['path_' + self.settings['record_video']['record_live_tool']] + self.settings['record_video']['record_live_tool']
                         and url in proc.cmdline()
-                        and any(arg.startswith(f"{self.settings['folder_recording']}video_{self.idchannel}.{lastRecord['idVideo']}.{lastRecord['filenumber']}.") for arg in proc.cmdline())
+                        and any(arg.startswith(f"{self.settings['folder_recording']}video_{self.idchannel}.{live['idVideo']}.{lastRecord['filenumber']}.") for arg in proc.cmdline())
                         ):
                             proc_record_live_tool_exists = True                            
                             if self.settings['record_video']['record_live_tool'] == "yt-dlp":                           
@@ -419,13 +419,13 @@ class Program():
                                         for line in record_log:
                                             if "ffmpeg -y -loglevel repeat+info -i" in line:
                                                 proc_record_live_tool_ffmpeg = True
-                                                print(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}")
-                                                self.writelog(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}", 'normal')
+                                                print(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}")
+                                                self.writelog(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}", 'normal')
                                                 break
                                 
                     except Exception as e:
-                        print(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Impossible to get {self.settings['record_video']['record_live_tool']} process informations for video recording : {e}")
-                        self.writelog(f"[×] id_live={live['id_live']} idVideo={live['idVideo']} Impossible to get {self.settings['record_video']['record_live_tool']} process informations for video recording : {e}", 'normal')
+                        print(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} Impossible to get {self.settings['record_video']['record_live_tool']} process informations for video recording : {e}")
+                        self.writelog(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} Impossible to get {self.settings['record_video']['record_live_tool']} process informations for video recording : {e}", 'normal')
                         # We continue normally
             
             if proc_record_live_tool_exists is False or proc_record_live_tool_ffmpeg is True:
@@ -542,16 +542,16 @@ class Program():
                 record_yt_dlp_logfile_thread = threading.Thread(target=self.process_logfile, args=(recordProcess, record_logfile))
                 record_yt_dlp_logfile_thread.start()
         except Exception as e:
-            print(f"id_live={live['id_live']} idVideo={live['idVideo']} Error with launching {self.settings['record_video']['record_live_tool']} recording live {outputfile} : exception={e}")
-            self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Error with launching {self.settings['record_video']['record_live_tool']} recording live {outputfile} : exception={e}")
+            print(f"id_live={live['id_live']} idVideo={live['idVideo']} Error launching {self.settings['record_video']['record_live_tool']} recording live {outputfile} : exception={e}")
+            self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Error launching {self.settings['record_video']['record_live_tool']} recording live {outputfile} : exception={e}")
             return
 
         try:
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
 
         # UPDATE record in records table with status_recording = 'recording' and pid process
@@ -740,15 +740,15 @@ class Program():
             chat_downloader_logfileThread = threading.Thread(target=self.process_logfile, args=(recordProcess, chat_downloader_log_filename))
             chat_downloader_logfileThread.start()
         except Exception as e:
-            print(f"id_live={live['id_live']} idVideo={live['idVideo']} Error with launching chat_downloader recording chat {chatfile} : exception={e}")
-            self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Error with launching chat_downloader recording chat {chatfile} : exception={e}", 'normal')
+            print(f"id_live={live['id_live']} idVideo={live['idVideo']} Error launching chat_downloader recording chat {chatfile} : exception={e}")
+            self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Error launching chat_downloader recording chat {chatfile} : exception={e}", 'normal')
         
         try:
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
         
         # UPDATE chat in chats table with status_chat = 'recording' and pid process
@@ -878,11 +878,11 @@ class Program():
                     print(f"{url} : ytInitialPlayerResponse not found")
                     self.writelog(f"{url} : ytInitialPlayerResponse not found", 'debug')
             else:
-                print(f"[×] Response of url {url} isn't OK : {response.status_code} {response.text}")
-                self.writelog(f"[×] Response of url {url} isn't OK : {response.status_code} {response.text}", 'normal')
+                print(f"[x] Response of url {url} isn't OK : {response.status_code} {response.text}")
+                self.writelog(f"[x] Response of url {url} isn't OK : {response.status_code} {response.text}", 'normal')
         except Exception as e:
-            print(f"[×] Error url {url} : {e}")
-            self.writelog(f"[×] Error url {url} : {e}", 'normal')
+            print(f"[x] Error url {url} : {e}")
+            self.writelog(f"[x] Error url {url} : {e}", 'normal')
 
         return infosVideo
         
@@ -932,8 +932,8 @@ class Program():
                 streams_scrapetube = scrapetube.get_channel(channel_id=self.idchannel, content_type="streams", limit=30, cookies=self.settings['cookies'], sort_by="newest")
                 list_streams_scrapetube = list(streams_scrapetube)
             except Exception as e:
-                print(f"[×] Error scrapetube /streams : {e}")
-                self.writelog(f"[×] Error scrapetube /streams : {e}", 'normal')
+                print(f"[x] Error scrapetube /streams : {e}")
+                self.writelog(f"[x] Error scrapetube /streams : {e}", 'normal')
                 return
             
             for stream in list_streams_scrapetube:
@@ -947,8 +947,8 @@ class Program():
                     self.writelog(f"{url} is live !", 'debug')
                     streams.append(stream)
         else:
-            print(f"[×] idVideo={stream['videoId']} discovery_method must be live_url or streams_url, provided value={discovery_method}")
-            self.writelog(f"[×] idVideo={stream['videoId']} discovery_method must be live_url or streams_url, provided value={discovery_method}", 'normal')
+            print(f"[x] idVideo={stream['videoId']} discovery_method must be live_url or streams_url, provided value={discovery_method}")
+            self.writelog(f"[x] idVideo={stream['videoId']} discovery_method must be live_url or streams_url, provided value={discovery_method}", 'normal')
             return
 
         print(f"With discovery_method = {discovery_method}, found {len(streams)} running streams right now for this channel")
@@ -961,8 +961,8 @@ class Program():
             db = Database(self.settings['params_database'])
             connection = db.getConnection()
         except Exception as e:
-            print(f"[×] Error connecting to database : {e}")
-            self.writelog(f"[×] Error connecting to database : {e}", 'normal')
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
 
         # Browsing running streams
@@ -993,8 +993,8 @@ class Program():
                     self.writelog(f"idVideo={stream['videoId']} Ongoing live has never been recorded before", 'debug')
                 cursor.close()                
             except mysql.connector.Error as ex:
-                print(f"[×] idVideo={stream['videoId']} Mysql Error Get live infos from lives table : {ex}")
-                self.writelog(f"[×] idVideo={stream['videoId']} Mysql Error Get live infos from lives table : {ex}", 'normal')
+                print(f"[x] idVideo={stream['videoId']} Mysql Error Get live infos from lives table : {ex}")
+                self.writelog(f"[x] idVideo={stream['videoId']} Mysql Error Get live infos from lives table : {ex}", 'normal')
                 self.exitProgram()
 
             # Insert live in lives table if needed
@@ -1101,7 +1101,14 @@ class Program():
                     except Exception as e:
                         print(f"Error sending email for new live started : {e}")
                         self.writelog(f"Error sending email for new live started : {e}", 'normal')
-                                        
+            else:
+                # Sometimes Youtube UI prints stream as running whereas it's finished. It happens with streams_url method (scaping /streams page)
+                # So we verify that we don't already have a dateEnd_YTB in database
+                if live['dateEnd_YTB'] is not None:
+                    print(f"id_live={live['id_live']} idVideo={stream['videoId']} discovery_method={discovery_method} detected this livestream as running while we got actualEndTime={live['dateEnd_YTB']} from Youtube DATA API. We don't record it.")
+                    self.writelog(f"id_live={live['id_live']} idVideo={stream['videoId']} discovery_method={discovery_method} detected this livestream as running while we got actualEndTime={live['dateEnd_YTB']} from Youtube DATA API. We don't record it.", 'normal')
+                    return
+                
             # Video and chat recording launched separatively at the same time in a thread
             recordVideoInitThread = threading.Thread(target=self.recordLiveInit, args=[live])
             recordVideoInitThread.start()
@@ -1211,6 +1218,7 @@ if __name__ == "__main__":
             '--remote-components', 'ejs:github', '--js-runtimes', 'deno:/home/vmczfjvdzf/.deno/bin',
             '--retries', '40', '--fragment-retries', '40', '--socket-timeout', '300',
             '-v', '-k',
+            '--match-filter', 'live_status=is_live', # Important because otherwise in some cases we'll try to record a finished livestream resulting in downloading the VOD            
             '--no-part', '--merge-output-format', 'mp4',
             '--extractor-args', 'youtube:player-client=default,web_embedded,mweb' #See https://github.com/yt-dlp/yt-dlp/issues/16862#issuecomment-4642619967
             ]
