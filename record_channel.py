@@ -501,8 +501,9 @@ class Program():
         basefile = f"{self.settings['folder_recording']}video_{self.idchannel}.{live['idVideo']}"
         basefile_new_record = f"{basefile}.{newRecord['filenumber']}"
         streamlink_file = f"{basefile_new_record}.ts"
-        yt_dlp_file = f"{basefile_new_record}.%(ext)s"
+        yt_dlp_file = f"{basefile_new_record}.mp4"
         outputfile = ''
+        mp4file = f"{basefile_new_record}.mp4"
         record_logfile = f"{self.settings['folder_recording']}{self.settings['record_video']['record_live_tool']}_{self.idchannel}.{live['idVideo']}.{newRecord['filenumber']}.txt"
         
         print(f"id_live={live['id_live']} idVideo={live['idVideo']} Starting recording live with with {self.settings['record_video']['record_live_tool']} basefile={basefile_new_record}")
@@ -655,7 +656,7 @@ class Program():
         
         # For streamlink record, convert .ts file to .mp4
         if self.settings['record_video']['record_live_tool'] == "streamlink":
-            # Conversion with ffmpeg : ffmpeg -i out.ts -c copy out.mp4 & delete out.ts
+            # Conversion with ffmpeg : ffmpeg -i out.ts -c copy out.mp4 & rename out.ts to out.ts.old
             if os.path.isfile(outputfile):
                 convertProcess = subprocess.Popen([self.settings['record_video']['path_ffmpeg'] + 'ffmpeg', "-i", outputfile, "-c", "copy", mp4file],
                 stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
