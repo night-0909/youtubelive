@@ -225,76 +225,161 @@ class Program():
 
         print(f"id_live={live['id_live']} idVideo={idVideo} Starting merge of mp4 files...")
         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Starting merge of mp4 files...", 'normal')
-        
-        merge = subprocess.Popen([self.settings['tools']['path_ffmpeg'] + 'ffmpeg', "-f", "concat", "-safe", "0", "-i", file_list, "-c" , "copy", finalmp4file],
-        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-        
-        try:
-            db = Database(self.settings['params_database'])
-            connection = db.getConnection()
-        except Exception as e:
-            print(f"[x] Error connecting to database : {e}")
-            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
-            self.exitProgram()        
-        
-        params = {'status_merging_all': 'ongoing'}
-        self.update_live(db, live, params)
-        
-        merge.wait()
+       
+        # Computation of mp4 file properties
+        mp4files_properties = []
+        for mp4file in mp4files:
+            audio_properties_obj = None
+            processGetAudioInfoMP4 = subprocess.Popen([self.settings['tools']['path_ffmpeg'] + 'ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name,channels', '-of', 'json', mp4file],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout, stderr = processGetAudioInfoMP4.communicate()
+            audio_properties_str = str(stdout.strip())
             
-        # Get duration of final file : goal is to detect diff in official stream duration, records in DB and duration of temporary files, and duration of merged mp4
-        # To get only duration with no other info : ffprobe -v error -show_entries format=duration -sexagesimal -of default=noprint_wrappers=1:nokey=1 <file>
-        # cf https://trac.ffmpeg.org/wiki/FFprobeTips#Formatcontainerduration
-        durationMP4 = None
-        processGetInfoMP4 = subprocess.Popen([self.settings['tools']['path_ffmpeg'] + 'ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-sexagesimal', '-of',
-        'default=noprint_wrappers=1:nokey=1', finalmp4file],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        stdout, stderr = processGetInfoMP4.communicate()
-        durationMP4 = str(stdout.strip())
-        
-        status_merging_all_duration = durationMP4
-        if processGetInfoMP4.returncode != 0:
-            status_merging_all_duration = str(stderr.strip())
+            try:
+                audio_properties_obj = json.loads(audio_properties_str)
+                audio_properties_streams = audio_properties_obj.get("streams")
+            except Exception as e:
+                print(f"id_live={live['id_live']} idVideo={idVideo} Impossible to load json string from ffprobe->audio for file={mp4file} exception : {e}, audio_properties_str={audio_properties_str}")
+                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Impossible to load json string from ffprobe->audio for file={mp4file} exception : {e}, audio_properties_str={audio_properties_str}", 'normal')
+                
+            processGetVideoInfoMP4 = subprocess.Popen([self.settings['tools']['path_ffmpeg'] + 'ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,width,height,pix_fmt', '-of', 'json', mp4file],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout, stderr = processGetVideoInfoMP4.communicate()
+            video_properties_str = str(stdout.strip())
             
-        live["status_merging_all_duration"] = status_merging_all_duration
-        live["status_merging_all_duration_ffprobe"] = processGetInfoMP4.returncode
+            video_properties_obj = None
+            try:
+                video_properties_obj = json.loads(video_properties_str)
+                video_properties_streams = video_properties_obj.get("streams")
+            except Exception as e:
+                print(f"id_live={live['id_live']} idVideo={idVideo} Impossible to load json string from ffprobe->video for file={mp4file} exception : {e}, video_properties_str={video_properties_str}")
+                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Impossible to load json string from ffprobe->video for file={mp4file} exception : {e}, video_properties_str={video_properties_str}", 'normal')
+            
+            mp4files_properties.append({"file": mp4file, "audio": audio_properties_streams, "video": video_properties_streams})
+                
+        # Verify if all mp4 files have same codecs and codecs properties
+        print("Verify if all mp4 files have same codecs and codecs properties")        
+        selected_method_concat = "concat_demuxer"
+        for index, mp4file_properties in enumerate(mp4files_properties):
+            if index < len(mp4files_properties) - 1:
+                if not (mp4files_properties[index]["audio"] == mp4files_properties[index + 1]["audio"]
+                and mp4files_properties[index]["video"] == mp4files_properties[index + 1]["video"]):
+                    selected_method_concat = "concat_filter"
+                    break
+            else:
+                break
+            
+        print(f"id_live={live['id_live']} idVideo={idVideo} Concat method to use is : {selected_method_concat}. mp4files_properties={mp4files_properties}")
+        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Concat method to use is : {selected_method_concat}. mp4files_properties={mp4files_properties}")
         
-        dateNow = self.getDateNow()
-        live['status_merging_all_ffmpeg'] = merge.returncode
-        live['date_status_merging_all'] = dateNow['dateDBString']
+        if selected_method_concat == "concat_demuxer":
+            # Method 1 : We launch concatenation
+            file_list_string = ''
+            for mp4file in mp4files:
+                file_list_string = f"{file_list_string}file '{mp4file}'\n"
 
-        if merge.returncode == 0 and os.path.isfile(finalmp4file) is True:
-            print(f"id_live={live['id_live']} idVideo={idVideo} Merge was done without error")
-            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Merge was done without error", 'normal')
+            print(f"id_live={live['id_live']} idVideo={idVideo} file_list_string : {file_list_string}")
+            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} file_list_string : {file_list_string}", 'normal')
+
+            file_list = f"{self.settings['folder_recording']}filelist_{live['idchannel']}.{idVideo}.txt"
+            f = open(file_list, "w", encoding="utf-8")
+            f.write(file_list_string)
+            f.close()
             
+            cmd_concat_demuxer = [self.settings['tools']['path_ffmpeg'] + 'ffmpeg', "-f", "concat", "-safe", "0", "-i", file_list, "-c" , "copy", finalmp4file]
+            merge = subprocess.Popen(cmd_concat_demuxer, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+            
+            try:
+                db = Database(self.settings['params_database'])
+                connection = db.getConnection()
+            except Exception as e:
+                print(f"[x] Error connecting to database : {e}")
+                self.writelog(f"[x] Error connecting to database : {e}", 'normal')
+                self.exitProgram()        
+            
+            params = {'status_merging_all': 'ongoing'}
+            self.update_live(db, live, params)
+            
+            merge.wait()
+                
+            # Get duration of final file : goal is to detect diff in official stream duration, records in DB and duration of temporary files, and duration of merged mp4
+            # To get only duration with no other info : ffprobe -v error -show_entries format=duration -sexagesimal -of default=noprint_wrappers=1:nokey=1 <file>
+            # cf https://trac.ffmpeg.org/wiki/FFprobeTips#Formatcontainerduration
+            durationMP4 = None
+            processGetInfoMP4 = subprocess.Popen([self.settings['tools']['path_ffmpeg'] + 'ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-sexagesimal', '-of',
+            'default=noprint_wrappers=1:nokey=1', finalmp4file],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout, stderr = processGetInfoMP4.communicate()
+            durationMP4 = str(stdout.strip())
+            
+            status_merging_all_duration = durationMP4
+            if processGetInfoMP4.returncode != 0:
+                status_merging_all_duration = str(stderr.strip())
+                
+            live["status_merging_all_duration"] = status_merging_all_duration
+            live["status_merging_all_duration_ffprobe"] = processGetInfoMP4.returncode
+            
+            dateNow = self.getDateNow()
+            live['status_merging_all_ffmpeg'] = merge.returncode
+            live['date_status_merging_all'] = dateNow['dateDBString']
+
+            if merge.returncode == 0 and os.path.isfile(finalmp4file) is True:
+                print(f"id_live={live['id_live']} idVideo={idVideo} Merge was done without error")
+                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Merge was done without error", 'normal')
+                
+                live['status_merging_all'] = "finished"
+                # Important : keep files in case something wrong is happening and original files are needed
+                # os.remove(file_list)
+                #for mp4file in mp4files:
+                #    if os.path.basename(mp4file) != os.path.basename(finalmp4file):
+                #        print("delete file " + mp4file)
+                        #os.remove(mp4file)
+            else:
+                # It would be nice to get stdout of merge command, see record_channel.py in recordLive() function
+                print(f"id_live={live['id_live']} idVideo={idVideo} Merge had error : {merge.returncode}")
+                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Merge had error : {merge.returncode}", 'normal')
+                live['status_merging_all'] = "error"
+
+            # UPDATE live with new status of merging and duration of merged .mp4 file
+            # HOW TO : https://stackoverflow.com/questions/11517106/how-to-update-mysql-with-python-where-fields-and-entries-are-from-a-dictionary
+            params = {"status_merging_all": live["status_merging_all"], "status_merging_all_ffmpeg": live['status_merging_all_ffmpeg'],
+            "date_status_merging_all": live["date_status_merging_all"], "status_merging_all_duration": live["status_merging_all_duration"],
+            "status_merging_all_duration_ffprobe": live["status_merging_all_duration_ffprobe"]}
+
+        elif selected_method_concat == "concat_filter":
+            # Method 2 : We only log ffmpeg commandline to do it later due to its long duration process
+            # ffmpeg command can be something like :
+            # ffmpeg -i 1.mp4 -i 2.mp4 -filter_complex "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]" -map "[outv]" -map "[outa]" output.mp4
+            # or : ffmpeg -i 1.mp4 -i 2.mp4 -filter_complex "[0:v]scale=width:height,setsar=1[v0];[1:v]scale=width:height,setsar=1[v1];[v0][0:a][v1][1:a]concat=n=2:v=1:a=1[outv][outa]" -map "[outv]" -map "[outa]" output.mp4
+            
+            # UPDATE live with new status of merging
             live['status_merging_all'] = "finished"
-            # Important : keep files in case something wrong is happening and original files are needed
-            # os.remove(file_list)
-            #for mp4file in mp4files:
-            #    if os.path.basename(mp4file) != os.path.basename(finalmp4file):
-            #        print("delete file " + mp4file)
-                    #os.remove(mp4file)
-        else:
-            # It would be nice to get stdout of merge command, see record_channel.py in recordLive() function
-            print(f"id_live={live['id_live']} idVideo={idVideo} Merge had error : {merge.returncode}")
-            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Merge had error : {merge.returncode}", 'normal')
-            live['status_merging_all'] = "error"
-
+            params = {'status_merging_all': live['status_merging_all']}
+            
+            cmd_concat_filter = f"{self.settings['tools']['path_ffmpeg']}ffmpeg "
+            cmd_concat_filter += " ".join(f"-i {value}" for value in mp4files)
+            cmd_concat_filter += " -filter_complex"
+            
+            # Something like : [0:v][0:a][1:v][1:a]
+            filter_complex_base_pre = '"' + "".join(f"[{index}:v][{index}:a]" for index, value in enumerate(mp4files))
+            
+            # Something like : [0:v]scale=width:height,setsar=1[v0];[1:v]scale=width:height,setsar=1[v1];[v0][0:a][v1][1:a]
+            filter_complex_resolution_pre = '"' + "".join(f"[{index}:v]scale=width:height,setsar=1[v{index}];" for index, value in enumerate(mp4files)) 
+            filter_complex_resolution_pre += "".join(f"[v{index}][{index}:a]" for index, value in enumerate(mp4files))
+            
+            # Something like : concat=n=2:v=1:a=1[outv][outa] -map "[outv]" -map "[outa]"
+            filter_complex_post = f"concat=n={len(mp4files)}:v=1:a=1[outv][outa]\" -map \"[outv]\" -map \"[outa]\""
+            
+            filter_complex_base_str = f"{filter_complex_base_pre}{filter_complex_post}"
+            filter_complex_resolution_str = f"{filter_complex_resolution_pre}{filter_complex_post}"
+            
+            print(f"id_live={live['id_live']} idVideo={idVideo} commandline to use to concat files : {cmd_concat_filter} {filter_complex_base_str} {finalmp4file}. Warning if video resolution are different, please adjust resolution in commandline : {cmd_concat_filter} {filter_complex_resolution_str} {finalmp4file}")
+            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} commandline to use to concat files : {cmd_concat_filter} {filter_complex_base_str} {finalmp4file}. Warning if video resolution are different, please adjust resolution in commandline : {cmd_concat_filter} {filter_complex_resolution_str} {finalmp4file}", 'normal')
+            
+        # UPDATE live with new status of merging
+        # HOW TO : https://stackoverflow.com/questions/11517106/how-to-update-mysql-with-python-where-fields-and-entries-are-from-a-dictionary
         try:
             db = Database(self.settings['params_database'])
-            connection = db.getConnection()
-        except Exception as e:
-            print(f"[x] Error connecting to database : {e}")
-            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
-            self.exitProgram()
-
-        # UPDATE live with new status of merging and duration of merged .mp4 file
-        # HOW TO : https://stackoverflow.com/questions/11517106/how-to-update-mysql-with-python-where-fields-and-entries-are-from-a-dictionary
-        params = {"status_merging_all": live["status_merging_all"], "status_merging_all_ffmpeg": live['status_merging_all_ffmpeg'],
-        "date_status_merging_all": live["date_status_merging_all"], "status_merging_all_duration": live["status_merging_all_duration"],
-        "status_merging_all_duration_ffprobe": live["status_merging_all_duration_ffprobe"]}
-
-        try:
             connection = db.getConnection()
             cursor = connection.cursor(prepared=True, dictionary=True)
             update_live_query = 'UPDATE lives SET {values} WHERE id_live = {id_live}'.format(values=', '.join('{}=%s'.format(keys) for keys in params), id_live=live["id_live"])
@@ -305,7 +390,7 @@ class Program():
             print(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new status of merging : {ex}")
             self.writelog(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with new status of merging : {ex}", 'normal')
             self.exitProgram()              
-            
+        
         # Close Mysql connection
         try:
             connection.close()
@@ -732,10 +817,10 @@ class Program():
                                     fragment_files = sorted(fragment_files, key=os.path.getmtime, reverse=True)
                                     if len(fragment_files) > 0:
                                         # If there's a least one file basefilenumber.fXXX.YYY, we don't do the merge automatically all records.
-                                        # first, merge of missing mp4 would have to be done, using basefilenumber.fXXX.YYY files
+                                        # First, merge of missing mp4 would have to be done, using basefilenumber.fXXX.YYY files
                                         # Something like that : ffmpeg -i basefilenumber.fXXX.ext -i basefilenumber.fYYY.ext -c copy -movflags +faststart basefilenumber.mp4
-                                        print(f"id_live={live['id_live']} idVideo={idVideo} {mp4file} isn't present and there are fragment files. Merge audio and video file manually.\n Fragment files=({fragment_files})")
-                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {mp4file} isn't present and there are fragment files. Merge audio and video file manually.\n Fragment files=({fragment_files})", 'normal')
+                                        print(f"id_live={live['id_live']} idVideo={idVideo} {mp4file} isn't present and there are fragment files. Merging of audio and video needs to be done.\n Fragment files={fragment_files}")
+                                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} {mp4file} isn't present and there are fragment files. Merging of audio and video needs to be done.\n Fragment files={fragment_files}", 'normal')
                                         
                                         # We merge audio and video streams only if mot recent fragment file is older than seconds_before_action seconds
                                         timestamp_now = datetime.now().timestamp()
@@ -774,17 +859,18 @@ class Program():
                                                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Merging audio and video stream encountered a problem for record={record}. merge_audio_video.returncode={merge_audio_video.returncode}, isfile={os.path.isfile(mp4file)} : {mp4file}", 'normal')
                                                         f_files_without_merge.append(fragment_files)                        
                                         else:
-                                            print(f"id_live={live['id_live']} idVideo={idVideo} Most recent fragment file is not older than {self.settings['process_video']['seconds_before_action']}")
-                                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Most recent fragment file is not older than {self.settings['process_video']['seconds_before_action']}", 'normal')
-                                            f_files_without_merge.append(fragment_files)                        
+                                            print(f"id_live={live['id_live']} idVideo={idVideo} Most recent fragment file is not older than {self.settings['process_video']['seconds_before_action']}, we skip")
+                                            self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Most recent fragment file is not older than {self.settings['process_video']['seconds_before_action']}, we skip", 'normal')
+                                            exitLive = True                                                                                       
+                                            
                         if exitLive is True:
                             continue
                                                
-                        # For yt-dlp, check if there are still some fragment files with no XXX.mp4 or XXX.temp.mp4
+                        # For yt-dlp, check if there are still some fragment files with no XXX.mp4
                         if lastRecord['recording_live_tool'] == 'yt-dlp':
                             if len(f_files_without_merge) > 0:
-                                print(f"id_live={live['id_live']} idVideo={idVideo} There are fragment files with no terminated or running mp4 merge, we don't merge files automatically. Fragment files={f_files_without_merge}")
-                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} There are fragment files with no terminated or running mp4 merge, we don't merge files automatically. Fragment files={f_files_without_merge}", 'normal')
+                                print(f"id_live={live['id_live']} idVideo={idVideo} There are fragment files with no terminated mp4 merge, we don't merge files automatically. Fragment files={f_files_without_merge}")
+                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} There are fragment files with no terminated mp4 merge, we don't merge files automatically. Fragment files={f_files_without_merge}", 'normal')
                                 params = {'status_merging_all': 'need_to_fix'}
                                 self.update_live(db, live, params)                            
                                 continue
@@ -872,18 +958,6 @@ class Program():
                         print(f"id_live={live['id_live']} idVideo={idVideo} Merge process of all mp4 is needed")
                         self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Merge process of all mp4 is needed", 'normal')
                         
-                        file_list_string = ''
-                        for mp4file in mp4files:
-                            file_list_string = f"{file_list_string}file '{mp4file}'\n"
-
-                        print(f"id_live={live['id_live']} idVideo={idVideo} file_list_string : {file_list_string}")
-                        self.writelog(f"id_live={live['id_live']} idVideo={idVideo} file_list_string : {file_list_string}", 'normal')
-
-                        file_list = f"{self.settings['folder_recording']}filelist_{live['idchannel']}.{idVideo}.txt"
-                        f = open(file_list, "w", encoding="utf-8")
-                        f.write(file_list_string)
-                        f.close()
-
                         mergeThread = threading.Thread(target=self.merge_mp4files, args=(live, mp4files))
                         mergeThreadList.append(mergeThread)
                         mergeThread.start()                       

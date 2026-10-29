@@ -1105,6 +1105,7 @@ class Program():
             else:
                 # Sometimes Youtube UI prints stream as running whereas it's finished. It happens with streams_url method (scaping /streams page)
                 # So we verify that we don't already have a dateEnd_YTB in database
+                # Another check is done when recording with yt-dlp, we use --match-filter live_status=is_live to be sure livestream is running
                 if live['dateEnd_YTB'] is not None:
                     print(f"id_live={live['id_live']} idVideo={stream['videoId']} discovery_method={discovery_method} detected this livestream as running while we got actualEndTime={live['dateEnd_YTB']} from Youtube DATA API. We don't record it.")
                     self.writelog(f"id_live={live['id_live']} idVideo={stream['videoId']} discovery_method={discovery_method} detected this livestream as running while we got actualEndTime={live['dateEnd_YTB']} from Youtube DATA API. We don't record it.", 'normal')
