@@ -403,6 +403,9 @@ class Program():
             proc_record_live_tool_exists = False
             proc_record_live_tool_ffmpeg = False
             if lastRecord is not None:
+                # Warning : it's possible that 2 recordings will be started at the same time, if first attempt created a record in records table but
+                # recording_pid is empty (record_live_tool hasn't already started for instance).
+                
                 if lastRecord['recording_pid'] is not None and psutil.pid_exists(lastRecord['recording_pid']) is True:
                     try:
                         proc = psutil.Process(lastRecord['recording_pid'])
@@ -482,6 +485,38 @@ class Program():
         else:
             print(f"id_live={live['id_live']} idVideo={live['idVideo']} Video recording is disabled in settings, we skip it")
             self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Video recording is disabled in settings, we skip it", 'debug')
+
+    def sendNotifMailLiveStarted(self, live):
+        url = "https://www.youtube.com/watch?v=" + live['idVideo']
+        print(f"Notification by mail needs to be sent")
+        self.writelog(f"Notification by mail needs to be sent", 'normal')
+            
+        # Log in to server using secure context and send email
+        # See : https://techoverflow.net/2021/03/23/how-to-send-email-with-file-attachment-via-smtp-in-python/
+        subject = f"Notification new live started for idchannel={self.idchannel} handlechannel={self.handlechannel}"
+        body = f"A new live has been started for :<br> idchannel={self.idchannel} urlchannel=<a href=\"{self.urlchannel}\">{self.urlchannel}</a> : <a href=\"{url}\">{url}</a><br>"
+        body += f"Title : {live['title']}"
+        sender_email = self.settings['mail']['username']
+        receiver_email = self.settings['mail']['to'] 
+
+        # Create message and set text content
+        mail = EmailMessage()
+        mail["From"] = sender_email
+        mail["To"] = receiver_email
+        mail["Subject"] = subject
+        # Set text content
+        mail.set_content(body, subtype='html')
+
+        try:
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(self.settings['mail']['server'], self.settings['mail']['port'], context=context) as server:
+                server.login(self.settings['mail']['username'], self.settings['mail']['password'])
+                mailsend = server.send_message(mail)
+                print(f"Notification by email for new live started sent : result={mailsend}")
+                self.writelog(f"Notification by email for new live started sent : result={mailsend}", "normal")
+        except Exception as e:
+            print(f"Error sending email for new live started : {e}")
+            self.writelog(f"Error sending email for new live started : {e}", 'normal')
         
     def process_logfile(self, process, filename):
         # Save stdout/stderr of process
@@ -1073,35 +1108,8 @@ class Program():
                 
                 # Notifications of live started
                 if self.settings['notifications']['mail'] is True:
-                    print(f"Notification by mail needs to be sent")
-                    self.writelog(f"Notification by mail needs to be sent", 'normal')
-                        
-                    # Log in to server using secure context and send email
-                    # See : https://techoverflow.net/2021/03/23/how-to-send-email-with-file-attachment-via-smtp-in-python/
-                    subject = f"Notification new live started for idchannel={self.idchannel} handlechannel={self.handlechannel}"
-                    body = f"A new live has been started for :<br> idchannel={self.idchannel} urlchannel=<a href=\"{self.urlchannel}\">{self.urlchannel}</a> : <a href=\"{url}\">{url}</a><br>"
-                    body += f"Title : {live['title']}"
-                    sender_email = self.settings['mail']['username']
-                    receiver_email = self.settings['mail']['to'] 
-
-                    # Create message and set text content
-                    mail = EmailMessage()
-                    mail["From"] = sender_email
-                    mail["To"] = receiver_email
-                    mail["Subject"] = subject
-                    # Set text content
-                    mail.set_content(body, subtype='html')
-
-                    try:
-                        context = ssl.create_default_context()
-                        with smtplib.SMTP_SSL(self.settings['mail']['server'], self.settings['mail']['port'], context=context) as server:
-                            server.login(self.settings['mail']['username'], self.settings['mail']['password'])
-                            mailsend = server.send_message(mail)
-                            print(f"Notification by email for new live started, result={mailsend}")
-                            self.writelog(f"Notification by email for new live started, result={mailsend}", "normal")
-                    except Exception as e:
-                        print(f"Error sending email for new live started : {e}")
-                        self.writelog(f"Error sending email for new live started : {e}", 'normal')
+                    sendNotifMailLiveStartedThread = threading.Thread(target=self.sendNotifMailLiveStarted, args=[live])
+                    sendNotifMailLiveStartedThread.start()                   
             else:
                 # Sometimes Youtube UI prints stream as running whereas it's finished. It happens with streams_url method (scaping /streams page)
                 # So we verify that we don't already have a dateEnd_YTB in database

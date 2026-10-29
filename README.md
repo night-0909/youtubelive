@@ -81,3 +81,10 @@ or use cookies from a Youtube account.
 to members-only streams and +18y streams.
 
 
+**Bugs :**<br />
+- It's possible that 2 recordings of video or chat will be started at the same time for the same stream.<br />
+So it's important to always verify what's has been recorded (video and chat) and merged (video).<br />
+Use database records, file logs and file properties to check what happened.<br />
+You'll easily detect this case in record live tool logs (yt-dlp, streamlink, chat_downloader).
+For video duplicates, you can compare length of video on Youtube UI and in database, and length of files on your computer.<br />
+That's why it's important to keep original files in case of problems.<br />
