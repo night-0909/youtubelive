@@ -39,7 +39,7 @@ If recording hasn't started yet, it creates :<br />
 - for chat recording : chat.idchannel.idvideo.XXX.txt (contains messages), chat_downloader.idchannel.idvideo.XXX.txt (contains exceptions and messages)<br />
 - for video recording :<br />
 streamlink : video.idchannel.idvideo.XXX.ts, streamlink.idchannel.idvideo.XXX.txt<br />
-yt-dlp : video.idchannel.idvideo.XXX.fYYY.mp4 or video.idchannel.idvideo.XXX.mp4, yt-dlp.idchannel.idvideo.XXX.txt<br />
+yt-dlp : video.idchannel.idvideo.XXX.fYYY.ext/video.idchannel.idvideo.XXX.fZZZ.ext/video.idchannel.idvideo.XXX.fYYY.mp4 or video.idchannel.idvideo.XXX.mp4, yt-dlp.idchannel.idvideo.XXX.txt<br />
 
 At the end of the recording, for streamlink I convert ts file to mp4.<br />
 If there're some lagging/network connection problems, streamlink will exit after 120s timeout and record_channel.py will try every 5 sec to record stream/chat.
@@ -52,19 +52,23 @@ It also gathers starttime of stream from Youtube API V3.<br />
 - **record_process.py** : setup a cron every 10 min or something.<br />
 3 actions can be enabled in settings : process_video (convert, merge, rename video files), process_chat (rename chat files) and download_files (download files of video).<br />
 
-For lives recorded with streamlink, this script first converts remaining .ts files in .mp4 files.
-Then it merges all mp4 in one mp4 for each recorded stream. If there's only one recording for a stream,
-it renames video.idchannel.idvideo.001.mp4 to video.idchannel.idvideo.mp4 and same thing for chat file<br />
+For lives recorded with streamlink, this script first converts remaining .ts files in .mp4 files.<br />
+For lives recorded with yt-dlp, if needed it merges audio and video files and converts mpeg-ts format in mpeg-4 format.<br />
+<br />
+Then it tries to merge all mp4 in one mp4 for each recorded stream. If there's a difference in video/audio codec in mp4 files, merging is not started as
+it needs reencoding and will use 100% of your CPU. So, in this case, the commandline to use to merge is logged in record.log and you'll need to launch it manually.<br />
+If there's only one recording for a stream,
+it renames video.idchannel.idvideo.001.mp4 to video.idchannel.idvideo.mp4 and same thing for chat file.<br />
 If there's more than one chat file, it's up to you to manually check and rebuild all messages.<br />
 
-For lives recorded with yt-dlp, format files (fYYY.mp4) are not deleted by security, letting user verify/try to merge again format files in case of problems.
+All original video files are not not deleted by security, letting user verify/try to merge again files in case of problems.
 
 It can download files of video after live as ended.
 It also gathers endtime of stream from Youtube API V3.<br />
 
 **How to reprocess a live ?**<br />
 If you want to reprocess chat processing, clear status_rename_chat field in lives table.<br />
-For video processing, clear status_merging_all fields in same table.
+For video processing, clear status_merging_all fields in same table.<br />
 For download files of video, clear status_downloading_all fields in same table.
 
 **How to detect problems ?**<br />
