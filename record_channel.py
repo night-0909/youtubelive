@@ -422,8 +422,8 @@ class Program():
                                         for line in record_log:
                                             if "ffmpeg -y -loglevel repeat+info -i" in line:
                                                 proc_record_live_tool_ffmpeg = True
-                                                print(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}")
-                                                self.writelog(f"[x] id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}", 'normal')
+                                                print(f"id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}")
+                                                self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}", 'normal')
                                                 break
                                 
                     except Exception as e:
@@ -488,14 +488,14 @@ class Program():
 
     def sendNotifMailLiveStarted(self, live):
         url = "https://www.youtube.com/watch?v=" + live['idVideo']
-        print(f"Notification by mail needs to be sent")
-        self.writelog(f"Notification by mail needs to be sent", 'normal')
+        print(f"id_live={live['id_live']} idVideo={live['idVideo']} Notification by mail needs to be sent")
+        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Notification by mail needs to be sent", 'normal')
             
         # Log in to server using secure context and send email
         # See : https://techoverflow.net/2021/03/23/how-to-send-email-with-file-attachment-via-smtp-in-python/
         subject = f"Notification new live started for idchannel={self.idchannel} handlechannel={self.handlechannel}"
-        body = f"A new live has been started for :<br> idchannel={self.idchannel} urlchannel=<a href=\"{self.urlchannel}\">{self.urlchannel}</a> : <a href=\"{url}\">{url}</a><br>"
-        body += f"Title : {live['title']}"
+        body = f"A new live has been started for :<br>idchannel={self.idchannel} urlchannel=<a href=\"{self.urlchannel}\">{self.urlchannel}</a><br>"
+        body += f"<a href=\"{url}\">{url}</a> {live['title']}"
         sender_email = self.settings['mail']['username']
         receiver_email = self.settings['mail']['to'] 
 
@@ -512,11 +512,11 @@ class Program():
             with smtplib.SMTP_SSL(self.settings['mail']['server'], self.settings['mail']['port'], context=context) as server:
                 server.login(self.settings['mail']['username'], self.settings['mail']['password'])
                 mailsend = server.send_message(mail)
-                print(f"Notification by email for new live started sent : result={mailsend}")
-                self.writelog(f"Notification by email for new live started sent : result={mailsend}", "normal")
+                print(f"id_live={live['id_live']} idVideo={live['idVideo']} Notification by email for new live started sent : result={mailsend}")
+                self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Notification by email for new live started sent : result={mailsend}", "normal")
         except Exception as e:
-            print(f"Error sending email for new live started : {e}")
-            self.writelog(f"Error sending email for new live started : {e}", 'normal')
+            print(f"id_live={live['id_live']} idVideo={live['idVideo']} Error sending email for new live started : {e}")
+            self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Error sending email for new live started : {e}", 'normal')
         
     def process_logfile(self, process, filename):
         # Save stdout/stderr of process
@@ -594,7 +594,7 @@ class Program():
         newRecord['recording_pid'] = recordProcess.pid
         newRecord['status_recording'] = 'recording'
         try:
-            print(f"Update status status_recording = 'recording' and pid process with newRecord={newRecord}")
+            print(f"id_live={live['id_live']} idVideo={live['idVideo']} Update status status_recording = 'recording' and pid process with newRecord={newRecord}")
             connection = db.getConnection()
             cursor = connection.cursor(prepared=True, dictionary=True)
             update_record_query = """UPDATE records SET recording_pid = %(recording_pid)s, status_recording = %(status_recording)s WHERE id_record = %(id_record)s"""
@@ -791,7 +791,7 @@ class Program():
         newChat['chat_pid'] = recordProcess.pid
         newChat['status_chat'] = 'recording'
         try:
-            print("Update status status_chat = 'recording' with newChat={newChat}")
+            print(f"id_live={live['id_live']} idVideo={live['idVideo']} Update status status_chat = 'recording' with newChat={newChat}")
             connection = db.getConnection()
             cursor = connection.cursor(prepared=True, dictionary=True)
             update_chat_query = """UPDATE chats SET status_chat = %(status_chat)s, chat_pid = %(chat_pid)s WHERE id_chat = %(id_chat)s"""
@@ -850,7 +850,7 @@ class Program():
         newChat['status_chat'] = 'finished'
         newChat["status_chat_downloader"] = recordProcess.returncode
         try:
-            print("Update status status_chat = 'finished' with newChat ={newChat}")
+            print(f"id_live={live['id_live']} idVideo={live['idVideo']} Update status status_chat = 'finished' with newChat ={newChat}")
             connection = db.getConnection()
             cursor = connection.cursor(prepared=True, dictionary=True)
             update_chat_query = """UPDATE chats SET status_chat = %(status_chat)s, status_chat_downloader = %(status_chat_downloader)s, dateEnd = %(dateEnd)s
@@ -937,12 +937,21 @@ class Program():
         # Note : we don't record Premiere videos (streamlink can't do it at the moment, see yt-dlp that can record them).
         # To record Premiere videos, we need to grab only videos that are currently on air.
         # Code to add :
-        # in elif discovery_method == 'streams_url':, add :
+        # in elif discovery_method == 'streams_url':, replace with :
         # videostypes = ["streams", "videos"]
         # for videotype in videostypes :
-        #   videos = scrapetube.get_channel(channel_id=self.idchannel, content_type=videotype, cookies=self.settings['cookies'], sort_by="newest")
-        #       for video in videos:
-        #           if video['is_live'] is True
+        #   videos = scrapetube.get_channel(channel_id=self.idchannel, content_type=videotype, limit=30, cookies=self.settings['cookies'], sort_by="newest")
+        #   try:
+        #       videosList = list(videos)
+        #   except Exception as e:
+        #       print(f"[x] Error scrapetube /streams : {e}")
+        #       self.writelog(f"[x] Error scrapetube /streams : {e}", 'normal')
+        #   return
+        #        
+        #   for video in videosList:
+        #   ...
+        #       if video['is_live'] is True:
+        #   ...
         
         streams = []
         if discovery_method == 'live_url':
