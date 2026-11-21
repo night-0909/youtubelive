@@ -258,7 +258,7 @@ class Program():
             mp4files_properties.append({"file": mp4file, "audio": audio_properties_streams, "video": video_properties_streams})
                 
         # Verify if all mp4 files have same codecs and codecs properties
-        print("Verify if all mp4 files have same codecs and codecs properties")        
+        print(f"id_live={live['id_live']} idVideo={idVideo} Verify if all mp4 files have same codecs and codecs properties")        
         selected_method_concat = "concat_demuxer"
         for index, mp4file_properties in enumerate(mp4files_properties):
             if index < len(mp4files_properties) - 1:
@@ -400,7 +400,7 @@ class Program():
     def update_live(self, db, live, params):
         idVideo = live['idVideo']
         try:
-            print(f"Update live id_live={live['id_live']} idVideo={idVideo} with values : {params}")
+            print(f"id_live={live['id_live']} idVideo={idVideo} Update live with values : {params}")
             connection = db.getConnection()
             cursor = connection.cursor(prepared=True, dictionary=True)
             update_live_query = 'UPDATE lives SET {values} WHERE id_live = {id_live}'.format(values=', '.join('{}=%s'.format(keys) for keys in params), id_live=live["id_live"])
@@ -425,10 +425,177 @@ class Program():
         
         logfile.close()
 
-    def downloadVideosFiles(self, live):
+    def downloadVideosFilesNotProcessed(self, live):
         url = "https://www.youtube.com/watch?v=" + live['idVideo']       
         cmd_download = [self.settings['tools']['path_yt-dlp'] + 'yt-dlp',
-        '--ffmpeg-location', self.settings['tools']['path_ffmpeg'] + 'ffmpeg', *self.settings['download_files']['yt-dlp_options']]
+        '--ffmpeg-location', self.settings['tools']['path_ffmpeg'] + 'ffmpeg', *self.settings['download_files_not_processed']['yt-dlp_options']]
+        
+        if self.settings['cookies']:
+            cmd_download.extend(['--cookies', self.settings['cookies']])
+                                    
+        cmd_download.append(url)
+        
+        print(f"id_live={live['id_live']} idVideo={live['idVideo']} yt-dlp commandline : {cmd_download}")
+        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} yt-dlp commandline : {cmd_download}", 'normal')
+        try:
+            downloadProcess = subprocess.Popen(cmd_download, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+            # Record yt-dlp stderr and stdout to file
+            logfile = f"{self.settings['folder_recording']}temp_downloading_files_{live['idVideo']}.log"
+            if os.path.isfile(logfile):
+                os.remove(logfile)
+            
+            dl_yt_dlp_logfile_thread = threading.Thread(target=self.process_logfile, args=(downloadProcess, logfile))
+            dl_yt_dlp_logfile_thread.start()
+        except Exception as e:
+            print(f"id_live={live['id_live']} idVideo={live['idVideo']} Error launching yt-dlp to download files : exception={e}")
+            self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Error launching yt-dlp to download files : exception={e}", 'normal')
+            
+        try:
+            db = Database(self.settings['params_database'])
+            connection = db.getConnection()
+        except Exception as e:
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
+            self.exitProgram()        
+        
+        params = {'status_downloading_not_processed': 'ongoing'}
+        self.update_live(db, live, params)
+        
+        downloadProcess.wait()
+        
+        print(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={downloadProcess.returncode} : {logfile}")
+        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={downloadProcess.returncode} : {logfile}", 'normal')
+        
+        if downloadProcess.returncode == 0:
+            status_downloading_not_processed = 'finished'
+        else:
+            status_downloading_not_processed = 'error'
+               
+        try:
+            db = Database(self.settings['params_database'])
+            connection = db.getConnection()
+        except Exception as e:
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
+            self.exitProgram()
+        
+        params = {'status_downloading_not_processed': status_downloading_not_processed}
+        self.update_live(db, live, params)
+        
+    def process_download_videos_not_processed(self):
+        # ************** Download files of not processed lives from Youtube (video, audio, subs or infos that yt-dlp can save in a file (description, title, etc...)) *********
+        # Downloading after end of live can be useful if : you use record_channel only to record chat, if live recording failed or missed some segments,
+        # you prefer higher quality, you want to save title and description and other metadata accessible by yt-dlp, etc...)
+        # Youtube takes some hours to process a livestream to make a VOD, so it's important to not rely on it and also download live in post-live status.
+        
+        print("Downloading files of not processed lives after their ending")
+        
+        if self.settings['download_files_not_processed']['enabled'] is False:
+            print(f"Downloading files of not processed lives is disabled")
+            self.writelog(f"Downloading files of not processed lives is disabled", 'normal')
+            return
+        
+        try:
+            db = Database(self.settings['params_database'])
+            connection = db.getConnection()
+        except Exception as e:
+            print(f"[x] Error connecting to database : {e}")
+            self.writelog(f"[x] Error connecting to database : {e}", 'normal')
+            self.exitProgram()
+        
+        if self.settings['download_files_not_processed']['enabled'] is True:
+            downloadThreadList = []            
+            try:
+                select_livesD_query = """SELECT * FROM lives
+                WHERE lives.status_downloading_not_processed IS NULL
+                ORDER BY lives.id_live ASC"""
+                connection = db.getConnection()
+                cursor = connection.cursor(prepared=True, dictionary=True)
+                params = {}
+                cursor.execute(select_livesD_query, params)
+                lives_downloading_files_todo = cursor.fetchall()
+                if len(lives_downloading_files_todo) == 0:
+                    print("No not processed live needs downloading video files")
+                    self.writelog("No not processed live needs downloading video files", 'normal')
+                cursor.close()
+            except mysql.connector.Error as ex:
+                print(f"[x] Mysql Error SELECT not processed lives with records where video files has to be checked : {ex}")
+                self.writelog(f"[x] Mysql Error SELECT not processed lives with records where video files has to be checked : {ex}", 'normal')
+                self.exitProgram()
+
+            if len(lives_downloading_files_todo) > 0:
+                print("Browse not processed lives with downloading to do")
+                self.writelog("Browse not processed lives with downloading to do", 'normal')
+                for live in lives_downloading_files_todo:
+                    idVideo = live['idVideo']
+                    isRunning = False
+                    if live['dateEnd_YTB'] is None:
+                        try:
+                            streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, cookies=self.settings['cookies'], sort_by="newest")
+                            list_streams = list(streams)
+                        except Exception as e:
+                            print(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
+                            self.writelog(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
+                            continue
+                        
+                        for stream in list_streams:
+                            if live['idVideo'] == stream['videoId'] and stream['is_live'] is True:
+                                isRunning = True
+                                break
+                
+                    if isRunning is False:
+                        # UPDATE live with dateEnd_YTB if empty
+                        dateEnd_YTB = None
+                        if live['dateEnd_YTB'] is None:
+                            videosInfosURL = "https://www.googleapis.com/youtube/v3/videos?key=" + self.settings['YoutubeAPIV3']['youtubeKey'] + "&id=" + idVideo + \
+                            "&part=snippet,contentDetails,statistics,liveStreamingDetails"
+                            print(videosInfosURL)
+                            try:
+                                response = self.sessionGoogleApis.get(videosInfosURL, timeout=(3.05, 20))
+                                videosInfosResponse = response.text
+                                if response.status_code == 200:
+                                    video_json = json.loads(videosInfosResponse)       
+                                    item = video_json.get('items')[0]
+                                    actualEndTime = item.get('liveStreamingDetails').get('actualEndTime')
+                                    # Convert datetime iso 2025-12-06T17:30:42Z to 2025-12-06 17:30:42
+                                    actualEndTime_object = dateutil.parser.isoparse(actualEndTime)
+                                    dateEnd_YTB = actualEndTime_object.astimezone(self.tzinfo).strftime(self.settings['dateFormats']['dateDBString'])
+                            except Exception as e:
+                                # Not a problem if something's wrong in this request
+                                print(f"id_live={live['id_live']} idVideo={idVideo} Error getting actualEndTime from Youtube API V3 videosInfosURL {videosInfosURL} : {e}")
+                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Error getting actualEndTime from Youtube API V3 videosInfosURL {videosInfosURL} : {e}", 'normal')
+                        
+                            if dateEnd_YTB is not None:
+                                params['dateEnd_YTB'] = dateEnd_YTB
+                                try:
+                                    connection = db.getConnection()
+                                    cursor = connection.cursor(prepared=True, dictionary=True)
+                                    update_live_query = 'UPDATE lives SET {values} WHERE id_live = {id_live}'.format(values=', '.join('{}=%s'.format(keys) for keys in params), id_live=live["id_live"])
+                                    cursor.execute(update_live_query, list(params.values()))
+                                    connection.commit()
+                                    cursor.close()
+                                except mysql.connector.Error as ex:
+                                    print(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}")
+                                    self.writelog(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}", 'normal')
+                                    self.exitProgram()
+                        
+                        # Start downloading files in a thread 
+                        downloadThread = threading.Thread(target=self.downloadVideosFilesNotProcessed, args=[live])
+                        downloadThreadList.append(downloadThread)
+                        downloadThread.start()                       
+                    else:
+                        print(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downloading files of not processed lives")
+                        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downloading files of not processed lives", 'normal')
+                    
+                # Wait for all threads to finish
+                for t in downloadThreadList:
+                    t.join()
+
+    def downloadVideosFilesProcessed(self, live):
+        url = "https://www.youtube.com/watch?v=" + live['idVideo']       
+        cmd_download = [self.settings['tools']['path_yt-dlp'] + 'yt-dlp',
+        '--ffmpeg-location', self.settings['tools']['path_ffmpeg'] + 'ffmpeg', *self.settings['download_files_processed']['yt-dlp_options']]
         
         if self.settings['cookies']:
             cmd_download.extend(['--cookies', self.settings['cookies']])
@@ -459,7 +626,7 @@ class Program():
             self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()        
         
-        params = {'status_downloading_all': 'ongoing'}
+        params = {'status_downloading_processed': 'ongoing'}
         self.update_live(db, live, params)
         
         downloadProcess.wait()
@@ -479,12 +646,12 @@ class Program():
                         break
         
         if is_post_live is True:
-            status_downloading_all = None
+            status_downloading_processed = None
         else:        
             if downloadProcess.returncode == 0:
-                status_downloading_all = 'finished'
+                status_downloading_processed = 'finished'
             else:
-                status_downloading_all = 'error'
+                status_downloading_processed = 'error'
                
         try:
             db = Database(self.settings['params_database'])
@@ -494,19 +661,19 @@ class Program():
             self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
         
-        params = {'status_downloading_all': status_downloading_all}
+        params = {'status_downloading_processed': status_downloading_processed}
         self.update_live(db, live, params)
         
-    def process_download_videos(self):
-        # ************** Download live files from Youtube (video, audio, subs or infos that yt-dlp can save in a file (description, title, etc...)) *********
+    def process_download_videos_processed(self):
+        # ************** Download files of processed lives from Youtube (video, audio, subs or infos that yt-dlp can save in a file (description, title, etc...)) *********
         # Downloading after end of live can be useful if : you use record_channel only to record chat, if live recording failed or missed some segments,
         # you prefer higher quality, you want to save title and description and other metadata accessible by yt-dlp, etc...)
         
-        print("Downloading files after live has ended")
+        print("Downloading files of processed lives after their ending")
         
-        if self.settings['download_files']['enabled'] is False:
-            print(f"Downloading videos files is disabled")
-            self.writelog(f"Downloading videos files is disabled", 'normal')
+        if self.settings['download_files_processed']['enabled'] is False:
+            print(f"Downloading files of processed lives is disabled")
+            self.writelog(f"Downloading files of processed lives is disabled", 'normal')
             return
         
         try:
@@ -517,11 +684,11 @@ class Program():
             self.writelog(f"[x] Error connecting to database : {e}", 'normal')
             self.exitProgram()
         
-        if self.settings['download_files']['enabled'] is True:
+        if self.settings['download_files_processed']['enabled'] is True:
             downloadThreadList = []            
             try:
                 select_livesD_query = """SELECT * FROM lives
-                WHERE lives.status_downloading_all IS NULL
+                WHERE lives.status_downloading_processed IS NULL
                 ORDER BY lives.id_live ASC"""
                 connection = db.getConnection()
                 cursor = connection.cursor(prepared=True, dictionary=True)
@@ -529,40 +696,77 @@ class Program():
                 cursor.execute(select_livesD_query, params)
                 lives_downloading_files_todo = cursor.fetchall()
                 if len(lives_downloading_files_todo) == 0:
-                    print("No live needs downloading video files")
-                    self.writelog("No live needs downloading video files", 'normal')
+                    print("No processed live needs downloading video files")
+                    self.writelog("No processed live needs downloading video files", 'normal')
                 cursor.close()
             except mysql.connector.Error as ex:
-                print(f"[x] Mysql Error SELECT lives with records where video files has to be checked : {ex}")
-                self.writelog(f"[x] Mysql Error SELECT lives with records where video files has to be checked : {ex}", 'normal')
+                print(f"[x] Mysql Error SELECT processed lives with records where video files has to be checked : {ex}")
+                self.writelog(f"[x] Mysql Error SELECT processed lives with records where video files has to be checked : {ex}", 'normal')
                 self.exitProgram()
 
             if len(lives_downloading_files_todo) > 0:
-                print("Browse lives with downloading to do")
-                self.writelog("Browse lives with downloading to do", 'normal')
+                print("Browse processed lives with downloading to do")
+                self.writelog("Browse processed lives with downloading to do", 'normal')
                 for live in lives_downloading_files_todo:
+                    idVideo = live['idVideo']
                     isRunning = False
-                    try:
-                        streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, cookies=self.settings['cookies'], sort_by="newest")
-                        list_streams = list(streams)
-                    except Exception as e:
-                        print(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
-                        self.writelog(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
-                        continue
-                    
-                    for stream in list_streams:
-                        if live['idVideo'] == stream['videoId'] and stream['is_live'] is True:
-                            isRunning = True
-                            break
+                    if live['dateEnd_YTB'] is None:
+                        try:
+                            streams = scrapetube.get_channel(live['idchannel'], content_type="streams", limit=30, cookies=self.settings['cookies'], sort_by="newest")
+                            list_streams = list(streams)
+                        except Exception as e:
+                            print(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}")
+                            self.writelog(f"[x] Error scrapetube /streams for idchannel={live['idchannel']} : {e}", 'normal')
+                            continue
+                        
+                        for stream in list_streams:
+                            if live['idVideo'] == stream['videoId'] and stream['is_live'] is True:
+                                isRunning = True
+                                break
                 
                     if isRunning is False:
+                        # UPDATE live with dateEnd_YTB if empty
+                        dateEnd_YTB = None
+                        if live['dateEnd_YTB'] is None:
+                            videosInfosURL = "https://www.googleapis.com/youtube/v3/videos?key=" + self.settings['YoutubeAPIV3']['youtubeKey'] + "&id=" + idVideo + \
+                            "&part=snippet,contentDetails,statistics,liveStreamingDetails"
+                            print(videosInfosURL)
+                            try:
+                                response = self.sessionGoogleApis.get(videosInfosURL, timeout=(3.05, 20))
+                                videosInfosResponse = response.text
+                                if response.status_code == 200:
+                                    video_json = json.loads(videosInfosResponse)       
+                                    item = video_json.get('items')[0]
+                                    actualEndTime = item.get('liveStreamingDetails').get('actualEndTime')
+                                    # Convert datetime iso 2025-12-06T17:30:42Z to 2025-12-06 17:30:42
+                                    actualEndTime_object = dateutil.parser.isoparse(actualEndTime)
+                                    dateEnd_YTB = actualEndTime_object.astimezone(self.tzinfo).strftime(self.settings['dateFormats']['dateDBString'])
+                            except Exception as e:
+                                # Not a problem if something's wrong in this request
+                                print(f"id_live={live['id_live']} idVideo={idVideo} Error getting actualEndTime from Youtube API V3 videosInfosURL {videosInfosURL} : {e}")
+                                self.writelog(f"id_live={live['id_live']} idVideo={idVideo} Error getting actualEndTime from Youtube API V3 videosInfosURL {videosInfosURL} : {e}", 'normal')
+                        
+                            if dateEnd_YTB is not None:
+                                params['dateEnd_YTB'] = dateEnd_YTB
+                                try:
+                                    connection = db.getConnection()
+                                    cursor = connection.cursor(prepared=True, dictionary=True)
+                                    update_live_query = 'UPDATE lives SET {values} WHERE id_live = {id_live}'.format(values=', '.join('{}=%s'.format(keys) for keys in params), id_live=live["id_live"])
+                                    cursor.execute(update_live_query, list(params.values()))
+                                    connection.commit()
+                                    cursor.close()
+                                except mysql.connector.Error as ex:
+                                    print(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}")
+                                    self.writelog(f"[x] id_live={live['id_live']} idVideo={idVideo} Mysql Error UPDATE live with dateEnd_YTB if empty : {ex}", 'normal')
+                                    self.exitProgram()
+                        
                         # Start downloading files in a thread 
-                        downloadThread = threading.Thread(target=self.downloadVideosFiles, args=[live])
+                        downloadThread = threading.Thread(target=self.downloadVideosFilesProcessed, args=[live])
                         downloadThreadList.append(downloadThread)
                         downloadThread.start()                       
                     else:
-                        print(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downlading files")
-                        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downloading files", 'normal')
+                        print(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downloading files of processed lives")
+                        self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} Stream is still up on Youtube, we skip downloading files of processed lives", 'normal')
                     
                 # Wait for all threads to finish
                 for t in downloadThreadList:
@@ -1210,12 +1414,16 @@ class Program():
         process_videos_Thread.start()
         process_chats_Thread = threading.Thread(target=self.process_chats)
         process_chats_Thread.start()
-        process_download_videos_Thread = threading.Thread(target=self.process_download_videos)
-        process_download_videos_Thread.start()               
+        process_download_videos_not_processed_Thread = threading.Thread(target=self.process_download_videos_not_processed)
+        process_download_videos_not_processed_Thread.start()                       
+        process_download_videos_processed_Thread = threading.Thread(target=self.process_download_videos_processed)
+        process_download_videos_processed_Thread.start()                       
         
         process_videos_Thread.join()
         process_chats_Thread.join()
-        process_download_videos_Thread.join()
+        process_download_videos_not_processed_Thread.join()
+        process_download_videos_processed_Thread.join()
+        
                 
         print("Execution was OK")
         self.writelog("Execution was OK")
@@ -1244,13 +1452,25 @@ if __name__ == "__main__":
         },
         'process_video': {
             'enabled' : True,
-            'seconds_before_action': 60*5  # 5 minutes // If streamlink is used, must be > "stream-timeout" from record_channel.py, plus let record_channel.py the time to convert .ts in mp4
+            'seconds_before_action': 60*5 # 5 minutes // If streamlink is used, must be > "stream-timeout" from record_channel.py, plus let record_channel.py the time to convert .ts in mp4
         },
         'process_chat': {
             'enabled' : True,
             'seconds_before_action': 60*10 # 10 minutes
         },
-        'download_files' : {
+        'download_files_not_processed' : {
+            'enabled' : True,
+            'yt-dlp_options': ['-S', 'res:480',
+            '-f', 'bestvideo+bestaudio/best',
+            '--remote-components', 'ejs:github', '--js-runtimes', 'deno:',  # Put path of deno folder
+            '--retries', '40', '--fragment-retries', '40', '--socket-timeout', '300',
+            '-v', '-k', '-o', os.path.dirname(os.path.realpath(__file__)) + '/files/' + 'temp_%(id)s %(title)s.%(ext)s',
+            '--match-filter', 'live_status=post_live',
+            '--no-part', '--merge-output-format', 'mp4',
+            '--extractor-args', 'youtube:player-client=default,web_embedded,mweb' #See https://github.com/yt-dlp/yt-dlp/issues/16862#issuecomment-4642619967
+            ]
+        },        
+        'download_files_processed' : {
             'enabled' : True,
             'yt-dlp_options': ['-S', 'res:480',
             '-f', 'bestvideo+bestaudio/best',
@@ -1272,5 +1492,3 @@ if __name__ == "__main__":
     
     program = Program(settings)
     program.main()
-    
-    

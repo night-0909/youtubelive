@@ -50,26 +50,30 @@ So you can end up with multiple files : video.idchannel.idvideo.001.ts, streamli
 It also gathers starttime of stream from Youtube API V3.<br />
 
 - **record_process.py** : setup a cron every 10 min or something.<br />
-3 actions can be enabled in settings : process_video (convert, merge, rename video files), process_chat (rename chat files) and download_files (download files of video).<br />
+4 actions can be enabled in settings : process_video (convert, merge, rename video files), process_chat (rename chat files),
+and download_files_not_processed (download files with live_status = "post_live") and download_files_processed (download files with live_status = "was_live").<br />
 
 For lives recorded with streamlink, this script first converts remaining .ts files in .mp4 files.<br />
 For lives recorded with yt-dlp, if needed it merges audio and video files and converts mpeg-ts format in mpeg-4 format.<br />
 <br />
 Then it tries to merge all mp4 in one mp4 for each recorded stream. If there's a difference in video/audio codec in mp4 files, merging is not started as
 it needs reencoding and will use 100% of your CPU. So, in this case, the commandline to use to merge is logged in record.log and you'll need to launch it manually.<br />
-If there's only one recording for a stream,
-it renames video.idchannel.idvideo.001.mp4 to video.idchannel.idvideo.mp4 and same thing for chat file.<br />
+If there's only one recording for a stream, it renames video.idchannel.idvideo.001.mp4 to video.idchannel.idvideo.mp4 and same thing for chat file.<br />
 If there's more than one chat file, it's up to you to manually check and rebuild all messages.<br />
 
 All original video files are not not deleted by security, letting user verify/try to merge again files in case of problems.
 
-It can download files of video after live as ended.
+It can download files of video after live as ended :
+- when Youtube hasn't process livestream yet (live_status = "post_live") : files are prefixed with "temp_".<br />
+- when Youtube finished processing livestream  (live_status = "was_live").<br />
+As Youtube can take 10 hours or more to process a livestream, it's recommended to activate both download_files_not_processed and download_files_processed.<br />
+
 It also gathers endtime of stream from Youtube API V3.<br />
 
 **How to reprocess a live ?**<br />
 If you want to reprocess chat processing, clear status_rename_chat field in lives table.<br />
 For video processing, clear status_merging_all fields in same table.<br />
-For download files of video, clear status_downloading_all fields in same table.
+For download files of video, clear status_downloading fields in same table.
 
 **How to detect problems ?**<br />
 See record_idchannel.log, yt-dlp_XXX.log, streamlink_XXX.log, chat_downloader_XXX.log, downloading_files_XXX.log, record_process.log and database records.
