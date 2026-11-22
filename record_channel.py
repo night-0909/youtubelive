@@ -415,12 +415,12 @@ class Program():
                         ):
                             proc_record_live_tool_exists = True                            
                             if self.settings['record_video']['record_live_tool'] == "yt-dlp":                           
-                                # Check in yt-dp log if "ffmpeg -y -loglevel repeat+info -i" string is present                               
+                                # Check in yt-dp log if "Merging formats into" string is present                               
                                 lastRecord_yt_dlp_logfile = f"{self.settings['folder_recording']}{self.settings['record_video']['record_live_tool']}_{self.idchannel}.{live['idVideo']}.{lastRecord['filenumber']}.txt"
                                 if os.path.isfile(lastRecord_yt_dlp_logfile):
                                     with open(lastRecord_yt_dlp_logfile, "r", encoding="utf-8") as record_log:
                                         for line in record_log:
-                                            if "ffmpeg -y -loglevel repeat+info -i" in line:
+                                            if "Merging formats into" in line:
                                                 proc_record_live_tool_ffmpeg = True
                                                 print(f"id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}")
                                                 self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} ffmpeg has started processing files for record={lastRecord}, we don't wait for its process to terminate\nLine={line}", 'normal')

@@ -635,6 +635,7 @@ class Program():
         self.writelog(f"id_live={live['id_live']} idVideo={live['idVideo']} downloading files has ended with returncode={downloadProcess.returncode} : {logfile}", 'normal')
         
         # Check if livestream was in Post-live mode. If true, we try downloading later
+        # String to search : "Video is in Post-Live Manifestless mode" or "does not pass filter (live_status=was_live)"
         is_post_live = False
         if os.path.isfile(logfile):
             with open(logfile, "r", encoding="utf-8") as downloading_log:
